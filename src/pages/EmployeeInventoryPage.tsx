@@ -4,7 +4,7 @@ import { EmployeeLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { Search, Package, ShoppingCart, Send, CheckCircle2, Settings2, Eye, X } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { PhoneCondition, Phone, PhoneColor } from '../types';
+import { PhoneCondition, Phone, PhoneColor, Store } from '../types';
 import { sendMessageToDB, fetchOnlineUsersFromDB } from '../lib/authService';
 import { supabase } from '../lib/supabase';
 import ReactBarcode from 'react-barcode';
@@ -14,6 +14,7 @@ export const EmployeeInventoryPage = () => {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [conditionFilter, setConditionFilter] = useState<PhoneCondition | 'All'>('All');
+  const [storeFilter, setStoreFilter] = useState<Store | 'All'>('All');
   const [activeBrandTab, setActiveBrandTab] = useState<string>('All');
   const [priceMin, setPriceMin] = useState('');
   const [priceMax, setPriceMax] = useState('');
@@ -33,6 +34,8 @@ export const EmployeeInventoryPage = () => {
   // Detail modal state
   const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
 
+  const availableStores = [...new Set(inventory.map(phone => phone.store))].sort();
+
   const filteredInventory = inventory.filter(phone => {
     const term = searchTerm.toLowerCase();
     const matchesSearch = phone.brand.toLowerCase().includes(term) || 
@@ -40,10 +43,11 @@ export const EmployeeInventoryPage = () => {
                           String(phone.price).includes(searchTerm) ||
                           (phone.colors?.some(c => c.reference?.toLowerCase().includes(term)) ?? false);
     const matchesCondition = conditionFilter === 'All' || phone.condition === conditionFilter;
+    const matchesStore = storeFilter === 'All' || phone.store === storeFilter;
     const matchesBrandTab = activeBrandTab === 'All' || phone.brand === activeBrandTab;
     const matchesPriceMin = priceMin === '' || phone.price >= Number(priceMin);
     const matchesPriceMax = priceMax === '' || phone.price <= Number(priceMax);
-    return matchesSearch && matchesCondition && matchesBrandTab && matchesPriceMin && matchesPriceMax;
+    return matchesSearch && matchesCondition && matchesStore && matchesBrandTab && matchesPriceMin && matchesPriceMax;
   });
 
   const totalPages = Math.max(1, Math.ceil(filteredInventory.length / ITEMS_PER_PAGE));
@@ -219,6 +223,16 @@ export const EmployeeInventoryPage = () => {
             <option value="All">Tous les états</option>
             <option value="Neuf">Neuf</option>
             <option value="Occasion">Occasion</option>
+          </select>
+          <select
+            className="w-full sm:w-auto bg-white border-2 border-slate-300 rounded-xl px-4 py-2 focus:outline-none focus:border-indigo-500 transition-colors appearance-none cursor-pointer"
+            value={storeFilter}
+            onChange={(e) => handleFilterChange(setStoreFilter)(e.target.value as Store | 'All')}
+          >
+            <option value="All">Tous les magasins</option>
+            {availableStores.map(store => (
+              <option key={store} value={store}>{store}</option>
+            ))}
           </select>
           <div className="flex items-center gap-2">
             <input

@@ -20,6 +20,15 @@ export const AdminInventoryPage = () => {
     ? stores.filter(s => currentUser?.stores.includes(s.name))
     : stores;
 
+  const getDefaultStore = () => {
+    if (isEmployee) {
+      const preferred = currentUser?.currentStore;
+      if (preferred && allowedStores.some(s => s.name === preferred)) return preferred;
+      return allowedStores[0]?.name || '';
+    }
+    return stores[0]?.name || '';
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [conditionFilter, setConditionFilter] = useState<PhoneCondition | 'All'>('All');
   const [storeFilter, setStoreFilter] = useState<Store | 'All'>('All');
@@ -51,19 +60,11 @@ export const AdminInventoryPage = () => {
     price: 0,
     quantity: 0,
     condition: 'Neuf',
-    store: allowedStores[0]?.name || ''
+    store: getDefaultStore()
   });
 
   // Detail modal state
   const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
-
-  // Generate a unique reference for a phone unit
-  const generateReference = () => {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let ref = 'PH-';
-    for (let i = 0; i < 8; i++) ref += chars[Math.floor(Math.random() * chars.length)];
-    return ref;
-  };
 
   const filteredInventory = inventory.filter(phone => {
     // Employees can only see phones in their assigned stores
@@ -82,11 +83,7 @@ export const AdminInventoryPage = () => {
     if (phone) {
       setEditingPhone(phone);
       setFormData(phone);
-      // Ensure all color entries have a reference
-      setFormColors((phone.colors || []).map(c => ({
-        ...c,
-        reference: c.reference || generateReference()
-      })));
+      setFormColors(phone.colors || []);
     } else {
       setEditingPhone(null);
       setFormData({
@@ -97,7 +94,7 @@ export const AdminInventoryPage = () => {
         price: 0,
         quantity: 0,
         condition: 'Neuf',
-        store: stores[0]?.name || ''
+        store: getDefaultStore()
       });
       setFormColors([]);
     }
@@ -107,6 +104,14 @@ export const AdminInventoryPage = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const phoneData = { ...formData, colors: formColors.length > 0 ? formColors : undefined };
+
+    // Enforce store constraints for employees at submit time.
+    if (isEmployee) {
+      const selectedStore = phoneData.store as Store | undefined;
+      const isAllowed = !!selectedStore && currentUser?.stores.includes(selectedStore);
+      phoneData.store = (isAllowed ? selectedStore : getDefaultStore()) as Store;
+    }
+
     // For Occasion, set global price from first color's price or 0
     if (phoneData.condition === 'Occasion' && formColors.length > 0) {
       const colorPrices = formColors.filter(c => c.price).map(c => c.price!);
@@ -127,7 +132,7 @@ export const AdminInventoryPage = () => {
     if (colorTotal >= maxQty) return;
     // For Neuf, one entry per color; for Occasion, allow duplicates (each unit = separate entry)
     if (formData.condition !== 'Occasion' && formColors.some(c => c.color === color)) return;
-    setFormColors([...formColors, { color, qty: 1, reference: generateReference() }]);
+    setFormColors([...formColors, { color, qty: 1, reference: '' }]);
   };
 
   const removeColorFromForm = (index: number) => {
@@ -149,7 +154,7 @@ export const AdminInventoryPage = () => {
     setDupPhone(phone);
     setDupColors([]);
     setDupQty(1);
-    setDupStore(stores.find(s => s.name !== phone.store)?.name || stores[0]?.name || '');
+    setDupStore(isEmployee ? getDefaultStore() : (stores.find(s => s.name !== phone.store)?.name || stores[0]?.name || ''));
   };
 
   const dupColorTotal = dupColors.reduce((s, c) => s + c.qty, 0);
@@ -612,9 +617,13 @@ export const AdminInventoryPage = () => {
                                 className="w-20 px-2 py-1 text-sm bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
                               />
                             )}
-                            {fc.reference && (
-                              <span className="text-[10px] font-mono text-slate-500 bg-slate-50 px-1.5 py-0.5 rounded-md">{fc.reference}</span>
-                            )}
+                            <input
+                              type="text"
+                              placeholder="IMEI"
+                              value={fc.reference || ''}
+                              onChange={(e) => updateColorCondition(idx, 'reference', e.target.value.trim())}
+                              className="w-40 px-2 py-1 text-xs font-mono bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+                            />
                             <button
                               type="button"
                               onClick={() => removeColorFromForm(idx)}

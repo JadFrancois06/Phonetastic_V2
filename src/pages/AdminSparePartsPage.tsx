@@ -20,6 +20,15 @@ export const AdminSparePartsPage = () => {
     ? stores.filter(s => currentUser?.stores.includes(s.name))
     : stores;
 
+  const getDefaultStore = () => {
+    if (isEmployee) {
+      const preferred = currentUser?.currentStore;
+      if (preferred && allowedStores.some(s => s.name === preferred)) return preferred;
+      return allowedStores[0]?.name || '';
+    }
+    return stores[0]?.name || '';
+  };
+
   const [searchTerm, setSearchTerm] = useState('');
   const [conditionFilter, setConditionFilter] = useState<PhoneCondition | 'All'>('All');
   const [storeFilter, setStoreFilter] = useState<Store | 'All'>('All');
@@ -59,7 +68,7 @@ export const AdminSparePartsPage = () => {
     price: 0,
     quantity: 0,
     condition: 'Neuf',
-    store: allowedStores[0]?.name || '',
+    store: getDefaultStore(),
   });
 
   const uniqueBrands = useMemo(() => {
@@ -187,7 +196,7 @@ export const AdminSparePartsPage = () => {
         price: 0,
         quantity: 0,
         condition: 'Neuf',
-        store: stores[0]?.name || '',
+        store: getDefaultStore(),
       });
       setFormQualities([]);
       setUseCustomBrand(false);
@@ -217,6 +226,13 @@ export const AdminSparePartsPage = () => {
       if (!seriesExists) {
         addBrandSeries(finalBrand, finalSeries.trim());
       }
+    }
+
+    // Enforce store constraints for employees at submit time
+    if (isEmployee) {
+      const selectedStore = formData.store as Store | undefined;
+      const isAllowed = !!selectedStore && currentUser?.stores.includes(selectedStore);
+      formData.store = (isAllowed ? selectedStore : getDefaultStore()) as Store;
     }
 
     const payload = {
@@ -257,8 +273,8 @@ export const AdminSparePartsPage = () => {
     setDupPrice(part.price);
     setDupQualities(copiedQualities);
     setDupCustomQuality('');
-    const otherStore = stores.find(s => s.name !== part.store);
-    setDupStore(otherStore?.name || stores[0]?.name || '');
+    const otherStore = isEmployee ? null : stores.find(s => s.name !== part.store);
+    setDupStore(isEmployee ? getDefaultStore() : (otherStore?.name || stores[0]?.name || ''));
   };
 
   const handleDupSubmit = (e: React.FormEvent) => {
