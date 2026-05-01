@@ -29,7 +29,7 @@ function downloadHistoryPDF(user: any, entries: any[], month: string) {
         <td style="padding:6px 12px;border-bottom:1px solid #f1f5f9;text-align:center">${e.store || '-'}</td>
         <td style="padding:6px 12px;border-bottom:1px solid #f1f5f9;text-align:center;font-family:monospace">${e.checkIn || '--:--'}</td>
         <td style="padding:6px 12px;border-bottom:1px solid #f1f5f9;text-align:center;font-family:monospace">${e.checkOut || '--:--'}</td>
-        <td style="padding:6px 12px;border-bottom:1px solid #f1f5f9;text-align:center">${hrs.toFixed(2)}h</td>
+        <td style="padding:6px 12px;border-bottom:1px solid #f1f5f9;text-align:center">${formatHours(hrs)}</td>
         <td style="padding:6px 12px;border-bottom:1px solid #f1f5f9;text-align:center">${mealIcon}</td>
         <td style="padding:6px 12px;border-bottom:1px solid #f1f5f9;text-align:center">${e.status || '-'}${e.status === 'En cours' ? ' (en temps réel)' : ''}</td>
       </tr>`;
@@ -58,7 +58,7 @@ function downloadHistoryPDF(user: any, entries: any[], month: string) {
     <th style="text-align:center">Statut</th>
   </tr></thead><tbody>${rows}</tbody></table>
   <div class="total">
-    <p>Total heures : <b>${totalHours.toFixed(2)}h</b></p>
+    <p>Total heures : <b>${formatHours(totalHours)}</b></p>
     <p>Repas : <b>${mealCount} repas × ${mealRate}€ = ${mealTotal.toFixed(2)}€</b></p>
     <p>Montant estimé : <b>${(totalAmount + mealTotal).toFixed(2)}€</b></p>
   </div>
