@@ -113,11 +113,11 @@ export const PointagePage = () => {
 
         {/* ─── Clock + Date ─── */}
         <div className="text-center space-y-5 bg-white rounded-2xl border border-slate-200 shadow-sm py-8">
-          <h1 className="text-7xl font-bold text-slate-900 tracking-tight font-mono">{formatTimeStr(currentTime)}</h1>
-          <p className="text-2xl text-slate-600 font-bold capitalize">{formatDate(currentTime)}</p>
+          <h1 className="text-5xl font-[900] text-slate-900 tracking-tight font-mono">{formatTimeStr(currentTime)}</h1>
+          <p className="text-xl text-slate-600 font-bold capitalize">{formatDate(currentTime)}</p>
           <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400 pt-1">
             <MapPin size={28} color='red'/>
-            <span className='text-xl text-indigo-500 font-bold'>{currentUser?.currentStore}</span>
+            <span className='text-lg text-indigo-500 font-bold'>{currentUser?.currentStore}</span>
           </div>
         </div>
 
