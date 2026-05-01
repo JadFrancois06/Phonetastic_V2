@@ -1,5 +1,18 @@
 import { supabase } from './supabase';
 import { User, Role, Status } from '../types';
+import { parsePhoneTransferMessage } from './phoneRequestProtocol';
+
+export interface PhoneReservationLock {
+  requestId: string;
+  phoneId: string;
+  requesterId: string;
+  requesterName: string;
+  receiverId: string;
+  fromStore: string;
+  toStore: string;
+  qty: number;
+  createdAt: string;
+}
 
 // Login: RPC call — queries users table server-side (no Supabase Auth needed)
 export async function loginWithCredentials(username: string, password: string): Promise<User | null> {
@@ -533,6 +546,54 @@ export async function fetchUnreadCountFromDB(receiverId: string): Promise<Record
 
 export async function markMessagesAsReadInDB(senderId: string, receiverId: string): Promise<void> {
   await supabase.from('messages').update({ read: true }).eq('sender_id', senderId).eq('receiver_id', receiverId).eq('read', false);
+}
+
+// Parses structured transfer request/response messages and returns active pending locks by phone ID.
+export async function fetchPhoneReservationLocksFromDB(): Promise<Record<string, PhoneReservationLock>> {
+  const { data, error } = await supabase
+    .from('messages')
+    .select('content, created_at')
+    .order('created_at', { ascending: true });
+
+  if (error || !data) return {};
+
+  const requestsById = new Map<string, PhoneReservationLock>();
+  const resolvedByRequestId = new Map<string, 'approved' | 'rejected'>();
+
+  data.forEach((m: any) => {
+    const parsed = parsePhoneTransferMessage(m.content);
+    if (!parsed) return;
+
+    if (parsed.kind === 'request') {
+      requestsById.set(parsed.data.requestId, {
+        requestId: parsed.data.requestId,
+        phoneId: parsed.data.phoneId,
+        requesterId: parsed.data.requesterId,
+        requesterName: parsed.data.requesterName,
+        receiverId: parsed.data.receiverId,
+        fromStore: parsed.data.fromStore,
+        toStore: parsed.data.toStore,
+        qty: parsed.data.qty,
+        createdAt: m.created_at || parsed.data.createdAt,
+      });
+      return;
+    }
+
+    resolvedByRequestId.set(parsed.data.requestId, parsed.data.status);
+  });
+
+  const locks: Record<string, PhoneReservationLock> = {};
+  requestsById.forEach((req) => {
+    const status = resolvedByRequestId.get(req.requestId);
+    if (status) return;
+
+    const current = locks[req.phoneId];
+    if (!current || new Date(req.createdAt).getTime() > new Date(current.createdAt).getTime()) {
+      locks[req.phoneId] = req;
+    }
+  });
+
+  return locks;
 }
 
 // ─── Sales ────────────────────────────────────────────────────

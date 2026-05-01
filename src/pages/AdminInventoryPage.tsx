@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { AdminLayout } from '../components/Layouts';
 import { useStore } from '../store';
@@ -158,26 +158,58 @@ export const AdminInventoryPage = () => {
   };
 
   const dupColorTotal = dupColors.reduce((s, c) => s + c.qty, 0);
+  const existingImeiSet = useMemo(() => {
+    const set = new Set<string>();
+    inventory.forEach((p) => {
+      (p.colors || []).forEach((c) => {
+        const ref = (c.reference || '').trim().toLowerCase();
+        if (ref) set.add(ref);
+      });
+    });
+    return set;
+  }, [inventory]);
 
   const addDupColor = (color: string) => {
-    if (dupColors.some(c => c.color === color)) return;
+    // Duplicate mode is per-unit: same color can appear multiple times, each with its own IMEI.
     if (dupColorTotal >= dupQty) return;
-    setDupColors([...dupColors, { color, qty: 1 }]);
+    setDupColors([...dupColors, { color, qty: 1, reference: '' }]);
   };
 
-  const removeDupColor = (color: string) => {
-    setDupColors(dupColors.filter(c => c.color !== color));
+  const removeDupColor = (index: number) => {
+    setDupColors(dupColors.filter((_, i) => i !== index));
   };
 
-  const updateDupColorQty = (color: string, qty: number) => {
-    const others = dupColors.filter(c => c.color !== color).reduce((s, c) => s + c.qty, 0);
-    const clamped = Math.max(0, Math.min(qty, dupQty - others));
-    setDupColors(dupColors.map(c => c.color === color ? { ...c, qty: clamped } : c));
+  const updateDupColorQty = (index: number, qty: number) => {
+    // In duplicate mode, qty is fixed to 1 per row (one device, one IMEI).
+    setDupColors(dupColors.map((c, i) => i === index ? { ...c, qty: 1 } : c));
+  };
+
+  const updateDupColorReference = (index: number, reference: string) => {
+    setDupColors(dupColors.map((c, i) => i === index ? { ...c, reference } : c));
   };
 
   const handleDupSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!dupPhone) return;
+
+    const refs = dupColors.map(c => (c.reference || '').trim()).filter(Boolean);
+    if (refs.length !== dupColors.length) {
+      window.alert('IMEI obligatoire: veuillez saisir un IMEI pour chaque unité.');
+      return;
+    }
+
+    const normalized = refs.map(r => r.toLowerCase());
+    if (new Set(normalized).size !== normalized.length) {
+      window.alert('IMEI en double: chaque téléphone doit avoir un IMEI unique.');
+      return;
+    }
+
+    const alreadyExists = normalized.find(r => existingImeiSet.has(r));
+    if (alreadyExists) {
+      window.alert(`IMEI déjà existant dans le stock: ${alreadyExists}`);
+      return;
+    }
+
     addPhone({
       brand: dupPhone.brand,
       model: dupPhone.model,
@@ -356,11 +388,17 @@ export const AdminInventoryPage = () => {
                           {phone.colors.map((c, i) => (
                             <span
                               key={i}
-                              className="inline-block w-8 h-8 rounded-lg border border-slate-300 shadow-sm cursor-pointer hover:scale-125 hover:ring-2 hover:ring-indigo-300 transition-all"
+                              className="relative inline-block w-8 h-8 rounded-lg border border-slate-300 shadow-sm cursor-pointer hover:scale-125 hover:ring-2 hover:ring-indigo-300 transition-all"
                               style={{ backgroundColor: c.color }}
-                              title={`${c.qty} unité(s)${c.reference ? ' · ' + c.reference : ''}`}
+                              title={c.qty === 0 ? 'Vendu' : `${c.qty} unité(s)${c.reference ? ' · ' + c.reference : ''}`}
                               onClick={() => setDetailPhone(phone)}
-                            />
+                            >
+                              {c.qty === 0 && (
+                                <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/60">
+                                  <X size={15} className="text-red-600 stroke-[3]" />
+                                </span>
+                              )}
+                            </span>
                           ))}
                           <button
                             type="button"
@@ -869,6 +907,7 @@ export const AdminInventoryPage = () => {
 
                 <div className="space-y-2">
                   <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Couleurs & Répartition ({dupColorTotal}/{dupQty})</label>
+                  <p className="text-[11px] text-rose-500 font-semibold">IMEI manuel obligatoire pour chaque unité (aucun doublon).</p>
                   <div className="flex flex-wrap gap-2">
                     {PHONE_COLORS.map(c => {
                       const selected = dupColors.some(fc => fc.color === c);
@@ -908,24 +947,32 @@ export const AdminInventoryPage = () => {
                   </div>
                   {dupColors.length > 0 && (
                     <div className="space-y-2 mt-2">
-                      {dupColors.map(fc => (
-                        <div key={fc.color} className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded border-2 border-slate-200" style={{ backgroundColor: fc.color }} />
-                          <input
-                            type="number"
-                            min="0"
-                            max={dupQty - (dupColorTotal - fc.qty)}
-                            value={fc.qty}
-                            onChange={e => updateDupColorQty(fc.color, Number(e.target.value))}
-                            className="w-20 px-2 py-1 text-sm bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => removeDupColor(fc.color)}
-                            className="text-red-400 hover:text-red-600 transition-colors"
-                          >
-                            <X size={16} />
-                          </button>
+                      {dupColors.map((fc, idx) => (
+                        <div key={`${fc.color}-${idx}`} className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded border-2 border-slate-200" style={{ backgroundColor: fc.color }} />
+                            <span className="w-20 px-2 py-1 text-sm bg-slate-100 border border-slate-200/80 rounded-lg text-slate-600 text-center">1 unité</span>
+                            <input
+                              type="text"
+                              placeholder="IMEI"
+                              value={fc.reference || ''}
+                              onChange={(e) => updateDupColorReference(idx, e.target.value.trim())}
+                              required
+                              className="flex-1 min-w-0 px-2 py-1 text-sm bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeDupColor(idx)}
+                              className="text-red-400 hover:text-red-600 transition-colors"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                          {fc.reference && (
+                            <div className="ml-8 inline-flex bg-white rounded-lg p-1.5 border border-slate-200">
+                              <ReactBarcode value={fc.reference} format="CODE128" width={1.2} height={30} fontSize={9} margin={2} />
+                            </div>
+                          )}
                         </div>
                       ))}
                       <p className={`text-xs ${dupColorTotal > dupQty ? 'text-red-500 font-medium' : 'text-slate-500'}`}>
@@ -1005,7 +1052,7 @@ export const AdminInventoryPage = () => {
               <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
                 {detailPhone.colors && detailPhone.colors.length > 0 ? (
                   detailPhone.colors.map((c, i) => (
-                    <div key={i} className="p-3 rounded-xl border border-slate-100 bg-slate-50 space-y-2">
+                    <div key={i} className={cn('p-3 rounded-xl border space-y-2', c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50')}>
                       <div className="flex items-center gap-3">
                         <span
                           className="w-10 h-10 rounded-lg border-2 border-slate-200 shrink-0"
@@ -1015,6 +1062,11 @@ export const AdminInventoryPage = () => {
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-semibold text-slate-900">Unité {i + 1}</span>
                             <span className="text-xs text-slate-500">× {c.qty}</span>
+                            {c.qty === 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
+                                <X size={9} className="stroke-[3]" /> VENDU
+                              </span>
+                            )}
                             {c.price ? (
                               <span className="text-sm font-bold text-indigo-600">{c.price}€</span>
                             ) : detailPhone.price > 0 ? (

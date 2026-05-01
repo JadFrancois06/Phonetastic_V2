@@ -1,4 +1,4 @@
-export type Role = 'Administrateur' | 'Employé';
+export type Role = 'Administrateur' | 'Employé' | 'Stock';
 export type Status = 'Actif' | 'Inactif';
 export type AttendanceStatus = 'Présent' | 'Absent' | 'En cours' | 'Sorti' | 'En pause';
 

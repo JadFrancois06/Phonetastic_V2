@@ -24,6 +24,9 @@ import { EmployeeRecordPage } from './pages/EmployeeRecordPage';
 import { EmployeeRecordsListPage } from './pages/EmployeeRecordsListPage';
 import InvoiceEditorM1 from './pages/invoice_editor_m2';
 import InvoiceEditorM2 from './pages/invoice-editor_m1';
+import { TabletStoresPage } from './pages/TabletStoresPage';
+import { TabletHubPage } from './pages/TabletHubPage';
+import { TabletStockPage } from './pages/TabletStockPage';
 
 
 export default function App() {
@@ -58,6 +61,13 @@ export default function App() {
         <Route path="/employee/inventory" element={<EmployeeInventoryPage />} />
         <Route path="/employee/spare-parts" element={<EmployeeSparePartsPage />} />
         <Route path="/employee/chat" element={<ChatPage />} />
+
+        {/* Stock / Tablet Routes */}
+        <Route path="/tablet/stores" element={<TabletStoresPage />} />
+        <Route path="/tablet/hub/:storeName" element={<TabletHubPage />} />
+        <Route path="/tablet/stock/:storeName" element={<TabletStockPage />} />
+        <Route path="/tablet/chat/:storeName" element={<ChatPage />} />
+        <Route path="/tablet/stock" element={<Navigate to="/tablet/stores" replace />} />
 
         {/* Default Redirect */}
         <Route path="/" element={<Navigate to="/login" replace />} />

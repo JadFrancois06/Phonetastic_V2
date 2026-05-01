@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { EmployeeLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { Search, Package, ShoppingCart, Send, CheckCircle2, Settings2, Eye, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PhoneCondition, Phone, PhoneColor, Store } from '../types';
-import { sendMessageToDB, fetchOnlineUsersFromDB } from '../lib/authService';
+import { sendMessageToDB, fetchOnlineUsersFromDB, fetchPhoneReservationLocksFromDB, PhoneReservationLock } from '../lib/authService';
 import { supabase } from '../lib/supabase';
 import ReactBarcode from 'react-barcode';
+import { buildPhoneTransferRequestContent } from '../lib/phoneRequestProtocol';
 
 export const EmployeeInventoryPage = () => {
   const { inventory, currentUser, sellPhone, addSale, brands, users } = useStore();
@@ -30,11 +31,32 @@ export const EmployeeInventoryPage = () => {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [freshOnlineIds, setFreshOnlineIds] = useState<Set<string>>(new Set());
+  const [phoneLocks, setPhoneLocks] = useState<Record<string, PhoneReservationLock>>({});
 
   // Detail modal state
   const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
 
   const availableStores = [...new Set(inventory.map(phone => phone.store))].sort();
+
+  const refreshPhoneLocks = async () => {
+    const locks = await fetchPhoneReservationLocksFromDB();
+    setPhoneLocks(locks);
+  };
+
+  useEffect(() => {
+    refreshPhoneLocks();
+
+    const ch = supabase
+      .channel('inventory-reservations')
+      .on('broadcast', { event: 'new-message' }, () => {
+        refreshPhoneLocks();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, []);
 
   const filteredInventory = inventory.filter(phone => {
     const term = searchTerm.toLowerCase();
@@ -115,37 +137,44 @@ export const EmployeeInventoryPage = () => {
 
   const handleSendRequest = async () => {
     if (!requestingPhone || !selectedReceiverId || !currentUser) return;
+    if (phoneLocks[requestingPhone.id]) return;
     const totalReqQty = requestColors.length || 1;
     setSending(true);
 
-    const colorLines = requestColors.filter(c => c.qty > 0).length > 0
-      ? requestColors.filter(c => c.qty > 0).map(c => {
-          // Find the matching color entry from the phone to get full details
-          const match = requestingPhone.colors?.find(pc => pc.color === c.color && pc.reference === c.reference);
-          let line = `  🎨 ${c.color} × ${c.qty}`;
-          if (match?.price) line += ` · ${match.price}€`;
-          if (match?.reference) line += `\n     🔖 Réf: ${match.reference}`;
-          if (match?.batteryHealth) line += ` · 🔋 ${match.batteryHealth}`;
-          if (match?.screenCondition) line += ` · 📱 ${match.screenCondition}`;
-          if (match?.frameCondition) line += ` · 🛡️ ${match.frameCondition}`;
-          return line;
-        }).join('\n') + '\n'
-      : '';
+    const colorDetails = requestColors
+      .filter(c => c.qty > 0)
+      .map(c => {
+        const match = requestingPhone.colors?.find(pc => pc.color === c.color && pc.reference === c.reference);
+        return {
+          color: c.color,
+          qty: c.qty,
+          reference: match?.reference,
+          price: match?.price,
+          batteryHealth: match?.batteryHealth,
+          screenCondition: match?.screenCondition,
+          frameCondition: match?.frameCondition,
+        };
+      });
 
-    const msg =
-      `📦 Demande de transfert\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `📱 ${requestingPhone.brand} ${requestingPhone.model}\n` +
-      `💾 Stockage : ${requestingPhone.storage}\n` +
-      `🧠 RAM : ${requestingPhone.ram}\n` +
-      `🏷️ État : ${requestingPhone.condition}\n` +
-      `💰 Prix : ${requestingPhone.price}€\n` +
-      `📊 Quantité totale : ${totalReqQty}\n` +
-      colorLines +
-      `🏪 Depuis : ${requestingPhone.store}\n` +
-      `➡️ Pour : ${currentUser.currentStore || currentUser.stores[0]}\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `Envoyé par ${currentUser.fullName}`;
+    const targetStore = currentUser.currentStore || currentUser.stores[0] || '';
+    const msg = buildPhoneTransferRequestContent({
+      type: 'phone_transfer_request',
+      requestId: `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      phoneId: requestingPhone.id,
+      phoneLabel: `${requestingPhone.brand} ${requestingPhone.model}`,
+      storage: requestingPhone.storage,
+      ram: requestingPhone.ram,
+      condition: requestingPhone.condition,
+      basePrice: requestingPhone.price,
+      colorDetails: colorDetails.length > 0 ? colorDetails : undefined,
+      fromStore: requestingPhone.store,
+      toStore: targetStore,
+      requesterId: currentUser.id,
+      requesterName: currentUser.fullName,
+      receiverId: selectedReceiverId,
+      qty: totalReqQty,
+      createdAt: new Date().toISOString(),
+    });
 
     const saved = await sendMessageToDB(currentUser.id, selectedReceiverId, msg);
     if (saved) {
@@ -157,6 +186,7 @@ export const EmployeeInventoryPage = () => {
           supabase.removeChannel(ch);
         }
       });
+      await refreshPhoneLocks();
     }
     setSending(false);
     setSent(true);
@@ -274,6 +304,7 @@ export const EmployeeInventoryPage = () => {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {paginatedInventory.map((phone) => (
+                
                   <tr key={phone.id} className="group hover:bg-slate-50/50 transition-colors">
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-3">
@@ -292,11 +323,17 @@ export const EmployeeInventoryPage = () => {
                           {phone.colors.map((c, i) => (
                             <span
                               key={i}
-                              className="inline-block w-7 h-7 rounded-lg border-2 border-slate-200 cursor-pointer hover:scale-110 hover:ring-2 hover:ring-indigo-300 transition-all"
+                              className="relative inline-block w-7 h-7 rounded-lg border-2 border-slate-200 cursor-pointer hover:scale-110 hover:ring-2 hover:ring-indigo-300 transition-all"
                               style={{ backgroundColor: c.color }}
-                              title={`${c.qty} unité(s)${c.price ? ' · ' + c.price + '€' : ''}${c.reference ? ' · ' + c.reference : ''}`}
+                              title={c.qty === 0 ? 'Vendu' : `${c.qty} unité(s)${c.price ? ' · ' + c.price + '€' : ''}${c.reference ? ' · ' + c.reference : ''}`}
                               onClick={() => setDetailPhone(phone)}
-                            />
+                            >
+                              {c.qty === 0 && (
+                                <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/60">
+                                  <X size={14} className="text-red-600 stroke-[3]" />
+                                </span>
+                              )}
+                            </span>
                           ))}
                           <button
                             type="button"
@@ -346,7 +383,16 @@ export const EmployeeInventoryPage = () => {
                       {phone.store}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
-                      {phone.store === currentUser?.currentStore ? (
+                      {phoneLocks[phone.id] ? (
+                        <button
+                          disabled
+                          title={`Réservé pour ${phoneLocks[phone.id].requesterName}`}
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-amber-100 text-amber-800 cursor-not-allowed"
+                        >
+                          <Package size={16} />
+                          Demande en cours
+                        </button>
+                      ) : phone.store === currentUser?.currentStore ? (
                         <button
                           onClick={() => handleSellClick(phone)}
                           disabled={phone.quantity === 0}
@@ -757,7 +803,7 @@ export const EmployeeInventoryPage = () => {
               <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
                 {detailPhone.colors && detailPhone.colors.length > 0 ? (
                   detailPhone.colors.map((c, i) => (
-                    <div key={i} className="p-3 rounded-xl border border-slate-100 bg-slate-50 space-y-2">
+                    <div key={i} className={cn('p-3 rounded-xl border space-y-2', c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50')}>
                       <div className="flex items-center gap-3">
                         <span
                           className="w-10 h-10 rounded-lg border-2 border-slate-200 shrink-0"
@@ -767,6 +813,11 @@ export const EmployeeInventoryPage = () => {
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-semibold text-slate-900">Unité {i + 1}</span>
                             <span className="text-xs text-slate-500">× {c.qty}</span>
+                            {c.qty === 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
+                                <X size={9} className="stroke-[3]" /> VENDU
+                              </span>
+                            )}
                             {c.price ? (
                               <span className="text-sm font-bold text-indigo-600">{c.price}€</span>
                             ) : detailPhone.price > 0 ? (

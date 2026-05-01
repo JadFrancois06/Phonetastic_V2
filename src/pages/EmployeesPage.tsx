@@ -116,7 +116,7 @@ export const EmployeesPage = () => {
         <div className="space-y-1.5">
           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Rôle</label>
           <Select 
-            options={[{ value: 'Employé', label: 'Employé' }, { value: 'Administrateur', label: 'Administrateur' }]}
+            options={[{ value: 'Employé', label: 'Employé' }, { value: 'Administrateur', label: 'Administrateur' }, { value: 'Stock', label: 'Stock (Tablette)' }]}
             value={formData.role}
             onChange={e => setFormData({...formData, role: e.target.value as Role})}
           />

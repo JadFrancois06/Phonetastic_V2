@@ -40,6 +40,8 @@ export const LoginPage = () => {
     if (currentUser) {
       if (currentUser.role === 'Administrateur') {
         navigate('/admin/dashboard');
+      } else if (currentUser.role === 'Stock') {
+        navigate('/tablet/stores');
       } else if (currentUser.currentStore) {
         navigate('/employee/dashboard');
       }

@@ -54,3 +54,36 @@ export const EmployeeLayout = ({ children, title }: { children: React.ReactNode;
     </div>
   );
 };
+
+export const TabletLayout = ({ children, title }: { children: React.ReactNode; title: string }) => {
+  const { currentUser, logout } = useStore();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!currentUser) navigate('/login');
+  }, [currentUser, navigate]);
+
+  if (!currentUser) return null;
+
+  return (
+    <div className="flex flex-col min-h-screen bg-slate-100">
+      {/* Minimal top bar */}
+      <header className="bg-slate-900 text-white px-6 py-3.5 flex items-center justify-between shrink-0 shadow-lg">
+        <div className="flex items-center gap-3">
+          <div className="h-8 w-8 rounded-lg bg-white/10 flex items-center justify-center text-white font-bold text-sm border border-white/10">P</div>
+          <span className="font-bold text-base tracking-tight">Phonetastic</span>
+          <span className="text-slate-400 text-sm font-medium">— {title}</span>
+        </div>
+        <button
+          onClick={() => { logout(); navigate('/login'); }}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 text-sm font-medium transition-colors cursor-pointer"
+        >
+          Déconnexion
+        </button>
+      </header>
+      <main className="flex-1 overflow-y-auto p-4 md:p-6">
+        {children}
+      </main>
+    </div>
+  );
+};
