@@ -90,7 +90,7 @@ export const EmployeeInventoryPage = () => {
   const confirmSell = () => {
     if (!sellingPhone) return;
     const finalPrice = Number(sellPrice) || 0;
-    const firstColor = sellingPhone.colors?.[0];
+    const firstColor = sellingPhone.colors?.find(c => c.qty > 0) || sellingPhone.colors?.[0];
     addSale({
       phoneBrand: sellingPhone.brand,
       phoneModel: sellingPhone.model,
@@ -804,36 +804,54 @@ export const EmployeeInventoryPage = () => {
                 {detailPhone.colors && detailPhone.colors.length > 0 ? (
                   detailPhone.colors.map((c, i) => (
                     <div key={i} className={cn('p-3 rounded-xl border space-y-2', c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50')}>
+                      {/* Row 1: color + title + status + price */}
                       <div className="flex items-center gap-3">
                         <span
                           className="w-10 h-10 rounded-lg border-2 border-slate-200 shrink-0"
                           style={{ backgroundColor: c.color }}
                         />
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center flex-wrap gap-1.5">
                             <span className="text-sm font-semibold text-slate-900">Unité {i + 1}</span>
-                            <span className="text-xs text-slate-500">× {c.qty}</span>
+                            {/* Condition badge per unit */}
+                            <span className={cn(
+                              'text-[10px] font-bold px-2 py-0.5 rounded-full',
+                              (c.condition || detailPhone.condition) === 'Neuf'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : 'bg-amber-100 text-amber-700'
+                            )}>
+                              {c.condition || detailPhone.condition}
+                            </span>
                             {c.qty === 0 && (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
                                 <X size={9} className="stroke-[3]" /> VENDU
                               </span>
                             )}
-                            {c.price ? (
-                              <span className="text-sm font-bold text-indigo-600">{c.price}€</span>
-                            ) : detailPhone.price > 0 ? (
-                              <span className="text-sm font-bold text-slate-600">{detailPhone.price}€</span>
-                            ) : null}
+                            <span className="text-sm font-bold text-indigo-600 ml-auto">
+                              {c.price ? `${c.price}€` : detailPhone.price > 0 ? `${detailPhone.price}€` : ''}
+                            </span>
                           </div>
                           {c.reference && (
                             <p className="text-[11px] font-mono text-slate-500">{c.reference}</p>
                           )}
                         </div>
                       </div>
+                      {/* Row 2: RAM + Storage badges */}
+                      <div className="flex flex-wrap gap-1.5">
+                        <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-semibold">
+                          {c.ram || detailPhone.ram} RAM
+                        </span>
+                        <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-semibold">
+                          {c.storage || detailPhone.storage}
+                        </span>
+                      </div>
+                      {/* Row 3: barcode */}
                       {c.reference && (
                         <div className="flex justify-center bg-white rounded-lg p-2 border border-slate-100">
                           <ReactBarcode value={c.reference} format="CODE128" width={1.5} height={35} fontSize={10} margin={2} />
                         </div>
                       )}
+                      {/* Row 4: Occasion-specific badges */}
                       {(c.batteryHealth || c.screenCondition || c.frameCondition) && (
                         <div className="flex flex-wrap gap-1.5">
                           {c.batteryHealth && (
@@ -846,6 +864,12 @@ export const EmployeeInventoryPage = () => {
                             <span className="text-[11px] px-2 py-0.5 bg-orange-50 text-orange-700 rounded-full font-medium">🛡️ {c.frameCondition}</span>
                           )}
                         </div>
+                      )}
+                      {/* Row 5: Notes */}
+                      {c.notes && (
+                        <p className="text-[11px] text-slate-600 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5 italic">
+                          📝 {c.notes}
+                        </p>
                       )}
                     </div>
                   ))

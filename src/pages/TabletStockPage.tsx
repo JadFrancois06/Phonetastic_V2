@@ -4,7 +4,8 @@ import { TabletLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { cn } from '../lib/utils';
 import { Phone, PhoneColor } from '../types';
-import { Package, Search, Send, X, ChevronLeft, Store, ShoppingCart, CheckCircle2 } from 'lucide-react';
+import { Package, Search, Send, X, ChevronLeft, Store, ShoppingCart, CheckCircle2, Eye } from 'lucide-react';
+import ReactBarcode from 'react-barcode';
 import {
   fetchPhoneReservationLocksFromDB,
   PhoneReservationLock,
@@ -17,7 +18,8 @@ type RequestColorState = PhoneColor & { selectedQty: number };
 
 const getAvailableQty = (phone: Phone) => {
   if (phone.colors && phone.colors.length > 0) {
-    return phone.colors.reduce((sum, c) => sum + c.qty, 0);
+    const colorsQty = phone.colors.reduce((sum, c) => sum + c.qty, 0);
+    return Math.max(0, Math.min(phone.quantity, colorsQty));
   }
   return phone.quantity;
 };
@@ -36,7 +38,7 @@ const getPriceDisplay = (phone: Phone) => {
 export const TabletStockPage = () => {
   const navigate = useNavigate();
   const { storeName } = useParams();
-  const { currentUser, setCurrentStore, inventory, users, stores, updatePhone, addSale } = useStore();
+  const { currentUser, setCurrentStore, inventory, users, stores, attendance, updatePhone, addSale } = useStore();
 
   const [search, setSearch] = useState('');
   const [conditionFilter, setConditionFilter] = useState<'All' | 'Neuf' | 'Occasion'>('All');
@@ -54,6 +56,10 @@ export const TabletStockPage = () => {
   const [sellColorIndex, setSellColorIndex] = useState<number>(0);
   const [sellPrice, setSellPrice] = useState('');
   const [sellConfirmed, setSellConfirmed] = useState(false);
+  const [sellEmployeeId, setSellEmployeeId] = useState('');
+
+  // Detail modal state
+  const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
 
   if (!currentUser) return <Navigate to="/login" replace />;
   if (currentUser.role !== 'Stock') return <Navigate to="/login" replace />;
@@ -104,18 +110,45 @@ export const TabletStockPage = () => {
     if (receiverCandidates.length === 0) setSelectedReceiverId('');
   }, [receiverCandidates, selectedReceiverId]);
 
+  // Employees present today in the active store
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const presentEmployees = useMemo(() => {
+    return users.filter(u => {
+      if (u.id === currentUser?.id) return false;
+      if (!u.stores.includes(activeStore)) return false;
+      // Check if they have an attendance entry today (present/en cours/en pause)
+      const todayEntry = attendance.find(
+        a => a.userId === u.id && a.date === todayStr &&
+        (a.status === 'En cours' || a.status === 'Présent' || a.status === 'En pause')
+      );
+      return !!todayEntry;
+    });
+  }, [users, attendance, activeStore, todayStr, currentUser?.id]);
+
+  // All employees of the store (fallback if no one is checked in)
+  const storeEmployees = useMemo(() => {
+    return users.filter(u => u.id !== currentUser?.id && u.stores.includes(activeStore) && u.role === 'Employé');
+  }, [users, activeStore, currentUser?.id]);
+
+  // Employees to show in dropdown: present ones first, fallback to all store employees
+  const sellCandidates = presentEmployees.length > 0 ? presentEmployees : storeEmployees;
+
   // Sell helpers
   const openSellModal = (phone: Phone) => {
     setSellConfirmed(false);
     setSellColorIndex(0);
     const firstAvailColor = phone.colors?.find(c => c.qty > 0);
     setSellPrice(String(firstAvailColor?.price ?? phone.price ?? ''));
+    // Pre-select first available employee
+    const candidates = presentEmployees.length > 0 ? presentEmployees : storeEmployees;
+    setSellEmployeeId(candidates.length > 0 ? candidates[0].id : '');
     setSellingPhone(phone);
   };
 
   const closeSellModal = () => {
     setSellingPhone(null);
     setSellConfirmed(false);
+    setSellEmployeeId('');
   };
 
   const confirmSell = () => {
@@ -134,6 +167,12 @@ export const TabletStockPage = () => {
     }
     const newQty = Math.max(0, sellingPhone.quantity - 1);
     updatePhone(sellingPhone.id, { quantity: newQty, colors: updatedColors });
+
+    // Determine seller: selected employee or fallback to current user
+    const seller = sellCandidates.find(u => u.id === sellEmployeeId);
+    const soldById = seller ? seller.id : currentUser.id;
+    const soldByName = seller ? seller.fullName : currentUser.fullName;
+
     addSale({
       phoneBrand: sellingPhone.brand,
       phoneModel: sellingPhone.model,
@@ -144,8 +183,8 @@ export const TabletStockPage = () => {
       reference: colorRef,
       price: finalPrice,
       store: sellingPhone.store,
-      soldBy: currentUser.id,
-      soldByName: currentUser.fullName,
+      soldBy: soldById,
+      soldByName: soldByName,
       soldAt: new Date().toISOString(),
     });
     setSellConfirmed(true);
@@ -326,7 +365,7 @@ export const TabletStockPage = () => {
         </div>
 
         {sortedPhones.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {sortedPhones.map(phone => {
               const qty = getAvailableQty(phone);
               const locked = phoneLocks[phone.id];
@@ -334,44 +373,67 @@ export const TabletStockPage = () => {
                 <div
                   key={phone.id}
                   className={cn(
-                    'rounded-2xl border bg-white p-4 shadow-sm transition-all',
-                    qty > 0 ? 'border-slate-200 hover:shadow-md' : 'border-slate-200 opacity-60'
+                    'rounded-2xl border bg-white p-5 shadow-sm transition-all',
+                    qty > 0 ? 'border-slate-200 hover:shadow-lg hover:border-slate-300' : 'border-slate-200 opacity-60'
                   )}
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  {/* Header: brand + model + condition badge */}
+                  <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-black text-slate-900">{phone.brand}</p>
-                      <p className="text-sm text-slate-500 font-medium">{phone.model}</p>
+                      <p className="text-base font-black text-slate-900 leading-tight">{phone.brand}</p>
+                      <p className="text-lg font-bold text-slate-700 leading-tight mt-0.5">{phone.model}</p>
                     </div>
                     <span className={cn(
-                      'text-[10px] font-bold px-2 py-1 rounded-lg',
+                      'text-xs font-bold px-3 py-1.5 rounded-xl shrink-0',
                       phone.condition === 'Neuf' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
                     )}>
                       {phone.condition}
                     </span>
                   </div>
 
-                  <p className="mt-2 text-xs text-slate-600">{phone.storage} · {phone.ram} RAM</p>
-                  <p className="mt-2 text-2xl font-black text-slate-900">{getPriceDisplay(phone)}</p>
-
+                  {/* Specs row */}
                   <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    {(phone.colors || []).slice(0, 6).map((c, idx) => (
-                      <span key={idx} className="relative w-6 h-6 rounded-md border border-slate-300" style={{ backgroundColor: c.color }} title={`${c.qty} unité(s)`}>
-                        {c.qty === 0 && <span className="absolute inset-0 flex items-center justify-center"><X size={10} className="text-red-600 stroke-[3]" /></span>}
+                    <span className="text-sm font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg">{phone.ram} RAM</span>
+                    <span className="text-sm font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg">{phone.storage}</span>
+                  </div>
+
+                  {/* Price */}
+                  <p className="mt-3 text-3xl font-black text-slate-900">{getPriceDisplay(phone)}</p>
+
+                  {/* Per-unit color dots with condition indicators */}
+                  <div className="mt-3 flex items-center gap-2 flex-wrap">
+                    {(phone.colors || []).slice(0, 8).map((c, idx) => (
+                      <span key={idx} className="relative" title={`${c.condition || phone.condition} · ${c.ram || phone.ram} · ${c.storage || phone.storage}${c.price ? ` · ${c.price}€` : ''}${c.reference ? ` · ${c.reference}` : ''}`}>
+                        <span className="w-8 h-8 rounded-lg border-2 border-slate-200 flex items-center justify-center" style={{ backgroundColor: c.color }}>
+                          {c.qty === 0 && <X size={12} className="text-red-600 stroke-[3]" />}
+                        </span>
+                        {(c.condition || phone.condition) === 'Occasion' && c.qty > 0 && (
+                          <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white" />
+                        )}
                       </span>
                     ))}
                   </div>
 
-                  <div className="mt-3 flex items-center justify-between">
+                  {/* Bottom row: qty badge + eye button + store */}
+                  <div className="mt-4 flex items-center justify-between">
                     <span className={cn(
-                      'text-xs font-bold px-2 py-1 rounded-lg',
+                      'text-sm font-bold px-3 py-1.5 rounded-xl',
                       qty > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'
                     )}>
                       {qty > 0 ? `${qty} dispo` : 'Épuisé'}
                     </span>
-                    <span className="text-xs text-slate-500 flex items-center gap-1">
-                      <Store size={12} /> {phone.store}
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setDetailPhone(phone); }}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 text-slate-600 hover:bg-indigo-100 hover:text-indigo-600 transition-colors text-xs font-bold"
+                        title="Voir les unités"
+                      >
+                        <Eye size={15} /> Détails
+                      </button>
+                      <span className="text-xs text-slate-400 flex items-center gap-1">
+                        <Store size={12} /> {phone.store}
+                      </span>
+                    </div>
                   </div>
 
                   {isOwnStore ? (
@@ -379,13 +441,13 @@ export const TabletStockPage = () => {
                       disabled={qty === 0}
                       onClick={() => openSellModal(phone)}
                       className={cn(
-                        'mt-4 w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold transition-all',
+                        'mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold transition-all',
                         qty > 0
                           ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 text-white hover:from-emerald-700 hover:to-emerald-800 shadow-lg shadow-emerald-600/25'
                           : 'bg-slate-100 text-slate-400 cursor-not-allowed'
                       )}
                     >
-                      <ShoppingCart size={15} />
+                      <ShoppingCart size={18} />
                       Vendre
                     </button>
                   ) : (
@@ -394,7 +456,7 @@ export const TabletStockPage = () => {
                         disabled={qty === 0 || Boolean(locked)}
                         onClick={() => openRequestModal(phone)}
                         className={cn(
-                          'mt-4 w-full inline-flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-bold transition-all',
+                          'mt-4 w-full inline-flex items-center justify-center gap-2 px-4 py-3.5 rounded-xl text-base font-bold transition-all',
                           qty > 0 && !locked
                             ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white hover:from-indigo-700 hover:to-indigo-800 shadow-lg shadow-indigo-600/25'
                             : locked
@@ -402,11 +464,11 @@ export const TabletStockPage = () => {
                               : 'bg-slate-100 text-slate-400 cursor-not-allowed'
                         )}
                       >
-                        <Package size={15} />
+                        <Package size={18} />
                         {locked ? 'Déjà réservé' : 'Demander transfert'}
                       </button>
                       {locked && (
-                        <p className="mt-2 text-[11px] text-amber-700">En attente: {locked.requesterName}</p>
+                        <p className="mt-2 text-xs font-semibold text-amber-700">En attente: {locked.requesterName}</p>
                       )}
                     </>
                   )}
@@ -424,27 +486,88 @@ export const TabletStockPage = () => {
         {/* ── Sell modal ─────────────────────────────────────── */}
         {sellingPhone && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center" onClick={closeSellModal}>
-            <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-xl rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
               {sellConfirmed ? (
-                <div className="p-8 text-center space-y-3">
-                  <div className="h-16 w-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
-                    <CheckCircle2 size={32} className="text-emerald-600" />
+                <div className="p-10 text-center space-y-4">
+                  <div className="h-20 w-20 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
+                    <CheckCircle2 size={44} className="text-emerald-600" />
                   </div>
-                  <p className="text-xl font-black text-slate-900">Vente enregistrée</p>
-                  <p className="text-sm text-slate-500">{sellingPhone.brand} {sellingPhone.model} vendu à {Number(sellPrice) || 0}€</p>
-                  <button onClick={closeSellModal} className="mt-2 px-6 py-2.5 rounded-xl bg-emerald-600 text-white font-bold">Fermer</button>
+                  <p className="text-2xl font-black text-slate-900">Vente enregistrée !</p>
+                  <p className="text-base text-slate-500">{sellingPhone.brand} {sellingPhone.model} vendu à <span className="font-bold text-emerald-600">{Number(sellPrice) || 0}€</span></p>
+                  <button onClick={closeSellModal} className="mt-2 px-8 py-3 rounded-xl bg-emerald-600 text-white font-bold text-base">Fermer</button>
                 </div>
               ) : (
                 <>
-                  <div className="px-5 py-4 border-b border-slate-200">
-                    <p className="text-lg font-black text-slate-900">Enregistrer une vente</p>
-                    <p className="text-sm text-slate-500 mt-1">{sellingPhone.brand} {sellingPhone.model} · {sellingPhone.storage} · {sellingPhone.ram}</p>
+                  <div className="px-6 py-5 border-b border-slate-200">
+                    <p className="text-xl font-black text-slate-900">Enregistrer une vente</p>
+                    <p className="text-base text-slate-500 mt-1">{sellingPhone.brand} {sellingPhone.model} · {sellingPhone.storage} · {sellingPhone.ram}</p>
                   </div>
-                  <div className="p-5 space-y-4">
+                  <div className="p-6 space-y-5 max-h-[65vh] overflow-y-auto">
+                    {/* Employee selector */}
+                    <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <label className="text-sm font-bold text-slate-700">Vendu par</label>
+                        {presentEmployees.length > 0 ? (
+                          <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 px-2.5 py-1 rounded-full">
+                            ✅ {presentEmployees.length} présent(s) aujourd'hui
+                          </span>
+                        ) : (
+                          <span className="text-xs font-semibold text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full">
+                            ⚠️ Aucun pointage
+                          </span>
+                        )}
+                      </div>
+                      {sellCandidates.length > 0 ? (
+                        <select
+                          value={sellEmployeeId}
+                          onChange={e => setSellEmployeeId(e.target.value)}
+                          className="w-full px-4 py-3.5 border-2 border-slate-200 rounded-xl text-base font-semibold text-slate-800 bg-white focus:outline-none focus:border-indigo-400 transition-colors"
+                        >
+                          {sellCandidates.map(u => (
+                            <option key={u.id} value={u.id}>{u.fullName}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <p className="text-sm text-rose-600 font-semibold">
+                          Aucun employé trouvé — vente attribuée à votre compte.
+                        </p>
+                      )}
+                    </div>
+                    {/* Employee selector */}
+                    <div>
+                      <label className="text-sm font-bold text-slate-500 uppercase tracking-wider">
+                        Vendu par
+                        {presentEmployees.length > 0 && (
+                          <span className="ml-2 text-[11px] font-semibold text-emerald-600 normal-case">
+                            ✅ {presentEmployees.length} employé(s) présent(s) aujourd'hui
+                          </span>
+                        )}
+                        {presentEmployees.length === 0 && storeEmployees.length > 0 && (
+                          <span className="ml-2 text-[11px] font-semibold text-amber-600 normal-case">
+                            ⚠️ Aucun pointage aujourd'hui — tous les employés du magasin affichés
+                          </span>
+                        )}
+                      </label>
+                      {sellCandidates.length > 0 ? (
+                        <select
+                          value={sellEmployeeId}
+                          onChange={e => setSellEmployeeId(e.target.value)}
+                          className="mt-2 w-full px-4 py-3.5 border-2 border-slate-200 rounded-2xl text-base font-semibold text-slate-800 bg-white focus:outline-none focus:border-indigo-400"
+                        >
+                          {sellCandidates.map(u => (
+                            <option key={u.id} value={u.id}>{u.fullName}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <p className="mt-2 text-sm text-rose-600 font-semibold">
+                          Aucun employé trouvé pour ce magasin. La vente sera attribuée à votre compte.
+                        </p>
+                      )}
+                    </div>
                     {sellingPhone.colors && sellingPhone.colors.filter(c => c.qty > 0).length > 0 && (
                       <div>
-                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Couleur / IMEI</label>
-                        <div className="mt-2 space-y-2">
+                        <label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Sélectionner l'unité à vendre</label>
+                        <div className="mt-3 space-y-3">
                           {sellingPhone.colors.map((c, i) => {
                             if (c.qty === 0) return null;
                             const realIdx = i;
@@ -456,16 +579,40 @@ export const TabletStockPage = () => {
                                   setSellPrice(String(c.price ?? sellingPhone.price));
                                 }}
                                 className={cn(
-                                  'w-full flex items-center gap-3 px-4 py-3 rounded-xl border-2 text-left transition-all',
-                                  sellColorIndex === realIdx ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white'
+                                  'w-full flex items-start gap-4 px-5 py-4 rounded-2xl border-2 text-left transition-all',
+                                  sellColorIndex === realIdx ? 'border-emerald-500 bg-emerald-50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300'
                                 )}
                               >
-                                <span className="w-8 h-8 rounded-md border border-slate-300 shrink-0" style={{ backgroundColor: c.color }} />
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-semibold text-slate-900">{c.color}</p>
-                                  {c.reference && <p className="text-xs text-slate-500">IMEI: {c.reference}</p>}
+                                <span className="w-12 h-12 rounded-xl border-2 border-slate-200 shrink-0" style={{ backgroundColor: c.color }} />
+                                <div className="flex-1 min-w-0 space-y-2">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="text-base font-bold text-slate-900">Unité {i + 1}</span>
+                                    <span className={cn(
+                                      'text-xs font-bold px-2.5 py-1 rounded-full',
+                                      (c.condition || sellingPhone.condition) === 'Neuf' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                                    )}>
+                                      {c.condition || sellingPhone.condition}
+                                    </span>
+                                    <span className="ml-auto text-xl font-black text-emerald-600">{c.price ?? sellingPhone.price}€</span>
+                                  </div>
+                                  <div className="flex gap-2 flex-wrap">
+                                    <span className="text-sm px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg font-semibold">{c.ram || sellingPhone.ram} RAM</span>
+                                    <span className="text-sm px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg font-semibold">{c.storage || sellingPhone.storage}</span>
+                                  </div>
+                                  {c.reference && (
+                                    <p className="text-sm font-mono text-slate-500">IMEI: {c.reference}</p>
+                                  )}
+                                  {(c.batteryHealth || c.screenCondition || c.frameCondition) && (
+                                    <div className="flex gap-2 flex-wrap">
+                                      {c.batteryHealth && <span className="text-sm px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg font-medium">🔋 {c.batteryHealth}</span>}
+                                      {c.screenCondition && <span className="text-sm px-2.5 py-1 bg-purple-50 text-purple-700 rounded-lg font-medium">📱 {c.screenCondition}</span>}
+                                      {c.frameCondition && <span className="text-sm px-2.5 py-1 bg-orange-50 text-orange-700 rounded-lg font-medium">🛡️ {c.frameCondition}</span>}
+                                    </div>
+                                  )}
+                                  {c.notes && (
+                                    <p className="text-sm text-slate-600 bg-yellow-50 border border-yellow-100 rounded-xl px-3 py-2 italic">📝 {c.notes}</p>
+                                  )}
                                 </div>
-                                <span className="text-sm font-bold text-slate-700">{c.price ?? sellingPhone.price}€</span>
                               </button>
                             );
                           })}
@@ -473,22 +620,22 @@ export const TabletStockPage = () => {
                       </div>
                     )}
                     <div>
-                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Prix de vente (€)</label>
+                      <label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Prix de vente (€)</label>
                       <input
                         type="number"
                         value={sellPrice}
                         onChange={e => setSellPrice(e.target.value)}
-                        className="mt-1 w-full px-4 py-3 border-2 border-slate-200 rounded-xl text-base font-bold focus:outline-none focus:border-emerald-500"
+                        className="mt-2 w-full px-5 py-4 border-2 border-slate-200 rounded-2xl text-2xl font-bold focus:outline-none focus:border-emerald-500"
                       />
                     </div>
                   </div>
-                  <div className="px-5 py-4 border-t border-slate-200 bg-slate-50 flex gap-3">
-                    <button onClick={closeSellModal} className="flex-1 py-3 rounded-xl border-2 border-slate-300 text-slate-700 text-sm font-bold">Annuler</button>
+                  <div className="px-6 py-5 border-t border-slate-200 bg-slate-50 flex gap-3">
+                    <button onClick={closeSellModal} className="flex-1 py-4 rounded-2xl border-2 border-slate-300 text-slate-700 text-base font-bold hover:bg-white transition-colors">Annuler</button>
                     <button
                       onClick={confirmSell}
-                      className="flex-1 py-3 rounded-xl bg-emerald-600 text-white text-sm font-bold inline-flex items-center justify-center gap-2"
+                      className="flex-1 py-4 rounded-2xl bg-emerald-600 text-white text-base font-bold inline-flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/25"
                     >
-                      <ShoppingCart size={16} /> Confirmer vente
+                      <ShoppingCart size={20} /> Confirmer vente
                     </button>
                   </div>
                 </>
@@ -572,6 +719,154 @@ export const TabletStockPage = () => {
             </div>
           </div>
         )}
+        {/* ── Unit Detail Modal ──────────────────────────────── */}
+        {detailPhone && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center" onClick={() => setDetailPhone(null)}>
+            <div className="w-full max-w-lg rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between">
+                <div>
+                  <p className="text-lg font-black text-slate-900">{detailPhone.brand} {detailPhone.model}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{detailPhone.storage} · {detailPhone.ram} RAM · {detailPhone.store}</p>
+                </div>
+                <button onClick={() => setDetailPhone(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
+                {detailPhone.colors && detailPhone.colors.length > 0 ? detailPhone.colors.map((c, i) => (
+                  <div key={i} className={cn(
+                    'p-3 rounded-xl border space-y-2',
+                    c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50'
+                  )}>
+                    <div className="flex items-center gap-3">
+                      <span className="w-10 h-10 rounded-lg border-2 border-slate-200 shrink-0" style={{ backgroundColor: c.color }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          <span className="text-sm font-bold text-slate-900">Unité {i + 1}</span>
+                          <span className={cn(
+                            'text-[10px] font-bold px-2 py-0.5 rounded-full',
+                            (c.condition || detailPhone.condition) === 'Neuf' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                          )}>
+                            {c.condition || detailPhone.condition}
+                          </span>
+                          {c.qty === 0 && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">VENDU</span>
+                          )}
+                          <span className="ml-auto text-sm font-black text-indigo-600">
+                            {c.price ? `${c.price}€` : detailPhone.price > 0 ? `${detailPhone.price}€` : ''}
+                          </span>
+                        </div>
+                        {c.reference && <p className="text-[11px] font-mono text-slate-500">{c.reference}</p>}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-semibold">{c.ram || detailPhone.ram} RAM</span>
+                      <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-semibold">{c.storage || detailPhone.storage}</span>
+                    </div>
+                    {c.reference && (
+                      <div className="flex justify-center bg-white rounded-lg p-2 border border-slate-100">
+                        <ReactBarcode value={c.reference} format="CODE128" width={1.5} height={35} fontSize={10} margin={2} />
+                      </div>
+                    )}
+                    {(c.batteryHealth || c.screenCondition || c.frameCondition) && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {c.batteryHealth && <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full font-medium">🔋 {c.batteryHealth}</span>}
+                        {c.screenCondition && <span className="text-[11px] px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full font-medium">📱 {c.screenCondition}</span>}
+                        {c.frameCondition && <span className="text-[11px] px-2 py-0.5 bg-orange-50 text-orange-700 rounded-full font-medium">🛡️ {c.frameCondition}</span>}
+                      </div>
+                    )}
+                    {c.notes && (
+                      <p className="text-[11px] text-slate-600 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5 italic">📝 {c.notes}</p>
+                    )}
+                  </div>
+                )) : (
+                  <p className="text-sm text-slate-500 text-center py-6">Aucun détail disponible.</p>
+                )}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+                <span className="text-xs text-slate-500">{detailPhone.quantity} unité(s) au total</span>
+                <button onClick={() => setDetailPhone(null)} className="px-4 py-2 text-sm font-bold text-slate-700 bg-white border-2 border-slate-300 rounded-xl hover:bg-slate-50">
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Unit Detail Modal ──────────────────────────────── */}
+        {detailPhone && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center" onClick={() => setDetailPhone(null)}>
+            <div className="w-full max-w-lg rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+              <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between">
+                <div>
+                  <p className="text-lg font-black text-slate-900">{detailPhone.brand} {detailPhone.model}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{detailPhone.storage} · {detailPhone.ram} RAM · {detailPhone.store}</p>
+                </div>
+                <button onClick={() => setDetailPhone(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                  <X size={20} />
+                </button>
+              </div>
+              <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
+                {detailPhone.colors && detailPhone.colors.length > 0 ? detailPhone.colors.map((c, i) => (
+                  <div key={i} className={cn(
+                    'p-3 rounded-xl border space-y-2',
+                    c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50'
+                  )}>
+                    <div className="flex items-center gap-3">
+                      <span className="w-10 h-10 rounded-lg border-2 border-slate-200 shrink-0" style={{ backgroundColor: c.color }} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center flex-wrap gap-1.5">
+                          <span className="text-sm font-bold text-slate-900">Unité {i + 1}</span>
+                          <span className={cn(
+                            'text-[10px] font-bold px-2 py-0.5 rounded-full',
+                            (c.condition || detailPhone.condition) === 'Neuf' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                          )}>
+                            {c.condition || detailPhone.condition}
+                          </span>
+                          {c.qty === 0 && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">VENDU</span>
+                          )}
+                          <span className="ml-auto text-sm font-black text-indigo-600">
+                            {c.price ? `${c.price}€` : detailPhone.price > 0 ? `${detailPhone.price}€` : ''}
+                          </span>
+                        </div>
+                        {c.reference && <p className="text-[11px] font-mono text-slate-500">{c.reference}</p>}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-semibold">{c.ram || detailPhone.ram} RAM</span>
+                      <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-semibold">{c.storage || detailPhone.storage}</span>
+                    </div>
+                    {c.reference && (
+                      <div className="flex justify-center bg-white rounded-lg p-2 border border-slate-100">
+                        <ReactBarcode value={c.reference} format="CODE128" width={1.5} height={35} fontSize={10} margin={2} />
+                      </div>
+                    )}
+                    {(c.batteryHealth || c.screenCondition || c.frameCondition) && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {c.batteryHealth && <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full font-medium">🔋 {c.batteryHealth}</span>}
+                        {c.screenCondition && <span className="text-[11px] px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full font-medium">📱 {c.screenCondition}</span>}
+                        {c.frameCondition && <span className="text-[11px] px-2 py-0.5 bg-orange-50 text-orange-700 rounded-full font-medium">🛡️ {c.frameCondition}</span>}
+                      </div>
+                    )}
+                    {c.notes && (
+                      <p className="text-[11px] text-slate-600 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5 italic">📝 {c.notes}</p>
+                    )}
+                  </div>
+                )) : (
+                  <p className="text-sm text-slate-500 text-center py-6">Aucun détail disponible.</p>
+                )}
+              </div>
+              <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
+                <span className="text-xs text-slate-500">{detailPhone.quantity} unité(s) au total</span>
+                <button onClick={() => setDetailPhone(null)} className="px-4 py-2 text-sm font-bold text-slate-700 bg-white border-2 border-slate-300 rounded-xl hover:bg-slate-50">
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </TabletLayout>
   );

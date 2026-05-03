@@ -371,9 +371,20 @@ export const useStore = () => {
     const phone = globalInventory.find(p => p.id === id);
     if (!phone || phone.quantity <= 0) return;
     const newQty = phone.quantity - 1;
-    globalInventory = globalInventory.map(p => p.id === id ? { ...p, quantity: newQty } : p);
+
+    let updatedColors = phone.colors ? [...phone.colors] : undefined;
+    if (updatedColors && updatedColors.length > 0) {
+      const firstAvailableIdx = updatedColors.findIndex(c => c.qty > 0);
+      if (firstAvailableIdx >= 0) {
+        updatedColors = updatedColors.map((c, i) =>
+          i === firstAvailableIdx ? { ...c, qty: Math.max(0, c.qty - 1) } : c
+        );
+      }
+    }
+
+    globalInventory = globalInventory.map(p => p.id === id ? { ...p, quantity: newQty, colors: updatedColors } : p);
     notify();
-    updatePhoneInDB(id, { quantity: newQty });
+    updatePhoneInDB(id, { quantity: newQty, colors: updatedColors });
   };
 
   const addSparePart = (part: Omit<SparePart, 'id'>) => {

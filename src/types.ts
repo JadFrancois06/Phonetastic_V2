@@ -83,10 +83,14 @@ export interface PhoneColor {
   qty: number;
   // Per-unit details
   reference?: string;
+  ram?: string;
+  storage?: string;
+  condition?: PhoneCondition;
   price?: number;
   batteryHealth?: string;
   screenCondition?: string;
   frameCondition?: string;
+  notes?: string;
 }
 
 export interface Phone {

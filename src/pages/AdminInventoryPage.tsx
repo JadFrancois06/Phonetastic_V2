@@ -7,6 +7,9 @@ import { cn } from '../lib/utils';
 import { Phone, PhoneCondition, PhoneColor, Store, PHONE_COLORS } from '../types';
 import ReactBarcode from 'react-barcode';
 
+const RAM_OPTIONS = ['2 Go', '3 Go', '4 Go', '6 Go', '8 Go', '12 Go', '16 Go', '24 Go'];
+const STORAGE_OPTIONS = ['32 Go', '64 Go', '128 Go', '256 Go', '512 Go', '1 To'];
+
 export const AdminInventoryPage = () => {
   const { inventory, stores, brands, addPhone, updatePhone, deletePhone, addBrand, deleteBrand, currentUser } = useStore();
 
@@ -83,14 +86,21 @@ export const AdminInventoryPage = () => {
     if (phone) {
       setEditingPhone(phone);
       setFormData(phone);
-      setFormColors(phone.colors || []);
+      setFormColors((phone.colors || []).map(c => ({
+        ...c,
+        qty: 1,
+        reference: c.reference || '',
+        ram: c.ram || phone.ram || '8 Go',
+        storage: c.storage || phone.storage || '128 Go',
+        price: typeof c.price === 'number' ? c.price : (phone.price || 0),
+      })));
     } else {
       setEditingPhone(null);
       setFormData({
         brand: brands[0]?.name || '',
         model: '',
-        ram: '',
-        storage: '',
+        ram: '8 Go',
+        storage: '128 Go',
         price: 0,
         quantity: 0,
         condition: 'Neuf',
@@ -103,7 +113,34 @@ export const AdminInventoryPage = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const phoneData = { ...formData, colors: formColors.length > 0 ? formColors : undefined };
+
+    const normalizedColors = formColors.map(c => ({ ...c, qty: 1 }));
+    const firstSpec = normalizedColors[0];
+
+    if (normalizedColors.length > 0 && normalizedColors.length !== (formData.quantity || 0)) {
+      window.alert('Le nombre de lignes (unités) doit être égal à la quantité totale.');
+      return;
+    }
+
+    const hasMissingSpec = normalizedColors.some(c => !c.ram || !c.storage || typeof c.price !== 'number' || Number.isNaN(c.price));
+    if (hasMissingSpec) {
+      window.alert('RAM, stockage et prix sont obligatoires pour chaque unité.');
+      return;
+    }
+
+    // Derive phone-level condition: if any unit is Occasion → mixed, else use first unit
+    const hasOccasion = normalizedColors.some(c => c.condition === 'Occasion');
+    const hasNeuf = normalizedColors.some(c => c.condition === 'Neuf' || !c.condition);
+    const derivedCondition: PhoneCondition = (hasOccasion && hasNeuf) ? 'Occasion' : (hasOccasion ? 'Occasion' : 'Neuf');
+
+    const phoneData: Partial<Phone> = {
+      ...formData,
+      condition: normalizedColors.length > 0 ? derivedCondition : formData.condition,
+      ram: firstSpec?.ram || '8 Go',
+      storage: firstSpec?.storage || '128 Go',
+      price: normalizedColors.length > 0 ? Math.min(...normalizedColors.map(c => Number(c.price) || 0)) : Number(formData.price) || 0,
+      colors: normalizedColors.length > 0 ? normalizedColors : undefined,
+    };
 
     // Enforce store constraints for employees at submit time.
     if (isEmployee) {
@@ -112,11 +149,6 @@ export const AdminInventoryPage = () => {
       phoneData.store = (isAllowed ? selectedStore : getDefaultStore()) as Store;
     }
 
-    // For Occasion, set global price from first color's price or 0
-    if (phoneData.condition === 'Occasion' && formColors.length > 0) {
-      const colorPrices = formColors.filter(c => c.price).map(c => c.price!);
-      phoneData.price = colorPrices.length > 0 ? Math.min(...colorPrices) : 0;
-    }
     if (editingPhone) {
       updatePhone(editingPhone.id, phoneData);
     } else {
@@ -130,19 +162,27 @@ export const AdminInventoryPage = () => {
 
   const addColorToForm = (color: string) => {
     if (colorTotal >= maxQty) return;
-    // For Neuf, one entry per color; for Occasion, allow duplicates (each unit = separate entry)
-    if (formData.condition !== 'Occasion' && formColors.some(c => c.color === color)) return;
-    setFormColors([...formColors, { color, qty: 1, reference: '' }]);
+    setFormColors([
+      ...formColors,
+      {
+        color,
+        qty: 1,
+        reference: '',
+        ram: formData.ram || '8 Go',
+        storage: formData.storage || '128 Go',
+        condition: formData.condition || 'Neuf',
+        price: Number(formData.price) || 0,
+      },
+    ]);
   };
 
   const removeColorFromForm = (index: number) => {
     setFormColors(formColors.filter((_, i) => i !== index));
   };
 
-  const updateColorQty = (index: number, qty: number) => {
-    const others = formColors.filter((_, i) => i !== index).reduce((s, c) => s + c.qty, 0);
-    const clamped = Math.max(0, Math.min(qty, maxQty - others));
-    setFormColors(formColors.map((c, i) => i === index ? { ...c, qty: clamped } : c));
+  const updateColorQty = (index: number, _qty: number) => {
+    // One row represents one physical unit.
+    setFormColors(formColors.map((c, i) => i === index ? { ...c, qty: 1 } : c));
   };
 
   const updateColorCondition = (index: number, field: string, value: string | number) => {
@@ -539,63 +579,17 @@ export const AdminInventoryPage = () => {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Mémoire RAM</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="ex: 8 Go"
-                      className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
-                      value={formData.ram}
-                      onChange={(e) => setFormData({ ...formData, ram: e.target.value })}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Stockage</label>
-                    <input
-                      required
-                      type="text"
-                      placeholder="ex: 128 Go"
-                      className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
-                      value={formData.storage}
-                      onChange={(e) => setFormData({ ...formData, storage: e.target.value })}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {formData.condition !== 'Occasion' && (
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Prix (€)</label>
-                      <input
-                        required
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
-                        value={formData.price}
-                        onChange={(e) => setFormData({ ...formData, price: Number(e.target.value) })}
-                      />
-                    </div>
-                  )}
-                  {formData.condition === 'Occasion' && (
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">💰 Prix par unité</label>
-                      <p className="text-xs text-slate-400">Défini par couleur ci-dessous</p>
-                    </div>
-                  )}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Quantité totale</label>
-                    <input
-                      required
-                      type="number"
-                      min="0"
-                      className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
-                      value={formData.quantity}
-                      onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Quantité totale</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                    value={formData.quantity}
+                    onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
+                  />
+                  <p className="text-[11px] text-slate-500">RAM, stockage et prix sont définis par unité dans les lignes ci-dessous.</p>
                 </div>
 
                 <div className="space-y-2">
@@ -643,18 +637,7 @@ export const AdminInventoryPage = () => {
                         <div key={idx} className="space-y-2">
                           <div className="flex items-center gap-2">
                             <span className="w-6 h-6 rounded border-2 border-slate-200" style={{ backgroundColor: fc.color }} />
-                            {formData.condition === 'Occasion' ? (
-                              <span className="text-xs text-slate-500 font-medium w-20">1 unité</span>
-                            ) : (
-                              <input
-                                type="number"
-                                min="0"
-                                max={maxQty - (colorTotal - fc.qty)}
-                                value={fc.qty}
-                                onChange={e => updateColorQty(idx, Number(e.target.value))}
-                                className="w-20 px-2 py-1 text-sm bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
-                              />
-                            )}
+                            <span className="text-xs text-slate-500 font-medium w-20">1 unité</span>
                             <input
                               type="text"
                               placeholder="IMEI"
@@ -675,21 +658,68 @@ export const AdminInventoryPage = () => {
                               <ReactBarcode value={fc.reference} format="CODE128" width={1.2} height={30} fontSize={9} margin={2} />
                             </div>
                           )}
-                          {formData.condition === 'Occasion' && (
-                            <div className="ml-8 space-y-2 p-3 bg-amber-50/60 border border-amber-100/80 rounded-xl">
-                              <div className="grid grid-cols-4 gap-2">
-                                <div>
-                                  <label className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">💰 Prix (€)</label>
-                                  <input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    placeholder="0"
-                                    className="w-full px-2 py-1.5 text-xs bg-white border border-amber-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-400 transition-all"
-                                    value={fc.price || ''}
-                                    onChange={(e) => updateColorCondition(idx, 'price', e.target.value ? Number(e.target.value) : '')}
-                                  />
-                                </div>
+                          <div className="ml-8 space-y-2 p-3 bg-indigo-50/60 border border-indigo-100/80 rounded-xl">
+                            <div className="grid grid-cols-4 gap-2">
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">État</label>
+                                <select
+                                  className="w-full px-2 py-1.5 text-xs bg-white border border-indigo-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+                                  value={fc.condition || 'Neuf'}
+                                  onChange={(e) => updateColorCondition(idx, 'condition', e.target.value)}
+                                >
+                                  <option value="Neuf">Neuf</option>
+                                  <option value="Occasion">Occasion</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">RAM</label>
+                                <select
+                                  className="w-full px-2 py-1.5 text-xs bg-white border border-indigo-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+                                  value={fc.ram || '8 Go'}
+                                  onChange={(e) => updateColorCondition(idx, 'ram', e.target.value)}
+                                >
+                                  {RAM_OPTIONS.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Stockage</label>
+                                <select
+                                  className="w-full px-2 py-1.5 text-xs bg-white border border-indigo-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+                                  value={fc.storage || '128 Go'}
+                                  onChange={(e) => updateColorCondition(idx, 'storage', e.target.value)}
+                                >
+                                  {STORAGE_OPTIONS.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Prix (€)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="0"
+                                  className="w-full px-2 py-1.5 text-xs bg-white border border-indigo-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+                                  value={fc.price ?? ''}
+                                  onChange={(e) => updateColorCondition(idx, 'price', e.target.value ? Number(e.target.value) : '')}
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Remarques (optionnel)</label>
+                              <textarea
+                                rows={2}
+                                placeholder="ex: Face ID non fonctionnel, micro-rayure sur le dos..."
+                                className="w-full px-2 py-1.5 text-xs bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all resize-none"
+                                value={fc.notes || ''}
+                                onChange={(e) => updateColorCondition(idx, 'notes', e.target.value)}
+                              />
+                            </div>
+                            {(fc.condition === 'Occasion') && (
+                              <div className="grid grid-cols-3 gap-2">
                                 <div>
                                   <label className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">🔋 Batterie</label>
                                   <input
@@ -733,8 +763,8 @@ export const AdminInventoryPage = () => {
                                   </select>
                                 </div>
                               </div>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
                       ))}
                       <p className={`text-xs ${colorTotal > maxQty ? 'text-red-500 font-medium' : 'text-slate-500'}`}>
@@ -742,25 +772,6 @@ export const AdminInventoryPage = () => {
                       </p>
                     </div>
                   )}
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">État</label>
-                  <select
-                    className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
-                    value={formData.condition}
-                    onChange={(e) => {
-                      const cond = e.target.value as PhoneCondition;
-                      setFormData({ ...formData, condition: cond });
-                      // For Occasion, force each color entry to qty 1
-                      if (cond === 'Occasion' && formColors.length > 0) {
-                        setFormColors(formColors.map(c => ({ ...c, qty: 1 })));
-                      }
-                    }}
-                  >
-                    <option value="Neuf">Neuf</option>
-                    <option value="Occasion">Occasion</option>
-                  </select>
                 </div>
 
                 <div className="space-y-1.5">
