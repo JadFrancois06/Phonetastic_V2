@@ -18,8 +18,9 @@ type RequestColorState = PhoneColor & { selectedQty: number };
 
 const getAvailableQty = (phone: Phone) => {
   if (phone.colors && phone.colors.length > 0) {
-    const colorsQty = phone.colors.reduce((sum, c) => sum + c.qty, 0);
-    return Math.max(0, Math.min(phone.quantity, colorsQty));
+    // Colors are the source of truth for quantity — never cap by phone.quantity
+    // to avoid stale data causing phantom "Épuisé" when some colors still have stock.
+    return phone.colors.reduce((sum, c) => sum + c.qty, 0);
   }
   return phone.quantity;
 };
@@ -165,7 +166,11 @@ export const TabletStockPage = () => {
         i === sellColorIndex ? { ...c, qty: Math.max(0, c.qty - 1) } : c
       );
     }
-    const newQty = Math.max(0, sellingPhone.quantity - 1);
+    // When colors are used, derive total quantity from the sum of remaining color quantities
+    // to keep phone.quantity in sync — avoids showing "Épuisé" when other colors still have stock.
+    const newQty = updatedColors.length > 0
+      ? updatedColors.reduce((sum, c) => sum + c.qty, 0)
+      : Math.max(0, sellingPhone.quantity - 1);
     updatePhone(sellingPhone.id, { quantity: newQty, colors: updatedColors });
 
     // Determine seller: selected employee or fallback to current user
