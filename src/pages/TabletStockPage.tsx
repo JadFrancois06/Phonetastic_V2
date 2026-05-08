@@ -137,8 +137,10 @@ export const TabletStockPage = () => {
   // Sell helpers
   const openSellModal = (phone: Phone) => {
     setSellConfirmed(false);
-    setSellColorIndex(0);
-    const firstAvailColor = phone.colors?.find(c => c.qty > 0);
+    // Find the REAL index of the first available color to avoid selling a qty=0 slot by default
+    const firstAvailIdx = phone.colors ? phone.colors.findIndex(c => c.qty > 0) : -1;
+    setSellColorIndex(firstAvailIdx >= 0 ? firstAvailIdx : 0);
+    const firstAvailColor = firstAvailIdx >= 0 ? phone.colors![firstAvailIdx] : undefined;
     setSellPrice(String(firstAvailColor?.price ?? phone.price ?? ''));
     // Pre-select first available employee
     const candidates = presentEmployees.length > 0 ? presentEmployees : storeEmployees;

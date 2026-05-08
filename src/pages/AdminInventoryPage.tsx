@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
 import { AdminLayout } from '../components/Layouts';
 import { useStore } from '../store';
-import { Plus, Search, Edit2, Trash2, Package, Settings2, X, Copy, Eye, Smartphone, AlertTriangle } from 'lucide-react';
+import { Plus, Search, Edit2, Trash2, Package, Settings2, X, Copy, Eye, Smartphone, AlertTriangle, RotateCcw, ShoppingCart } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Phone, PhoneCondition, PhoneColor, Store, PHONE_COLORS } from '../types';
 import ReactBarcode from 'react-barcode';
@@ -85,10 +85,10 @@ export const AdminInventoryPage = () => {
   const handleOpenModal = (phone?: Phone) => {
     if (phone) {
       setEditingPhone(phone);
-      setFormData(phone);
+      setFormData({ ...phone, quantity: (phone.colors && phone.colors.length > 0) ? phone.colors.length : phone.quantity });
       setFormColors((phone.colors || []).map(c => ({
         ...c,
-        qty: 1,
+        qty: c.qty ?? 1,  // preserve sold state (0) or available (1)
         reference: c.reference || '',
         ram: c.ram || phone.ram || '8 Go',
         storage: c.storage || phone.storage || '128 Go',
@@ -114,7 +114,8 @@ export const AdminInventoryPage = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const normalizedColors = formColors.map(c => ({ ...c, qty: 1 }));
+    // Preserve qty (0=sold, 1=available) — do NOT reset to 1
+    const normalizedColors = formColors.map(c => ({ ...c, qty: c.qty ?? 1 }));
     const firstSpec = normalizedColors[0];
 
     if (normalizedColors.length > 0 && normalizedColors.length !== (formData.quantity || 0)) {
@@ -135,6 +136,10 @@ export const AdminInventoryPage = () => {
 
     const phoneData: Partial<Phone> = {
       ...formData,
+      // quantity = number of available (unsold) units so the tablet sees the real stock
+      quantity: normalizedColors.length > 0
+        ? normalizedColors.reduce((s, c) => s + c.qty, 0)
+        : Number(formData.quantity) || 0,
       condition: normalizedColors.length > 0 ? derivedCondition : formData.condition,
       ram: firstSpec?.ram || '8 Go',
       storage: firstSpec?.storage || '128 Go',
@@ -544,7 +549,7 @@ export const AdminInventoryPage = () => {
         {/* Modal for Add/Edit */}
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] overflow-y-auto">
               <div className="p-5 border-b border-slate-100 flex items-center justify-between">
                 <h3 className="text-base font-bold text-slate-900">
                   {editingPhone ? 'Modifier le téléphone' : 'Ajouter au stock'}
@@ -645,6 +650,22 @@ export const AdminInventoryPage = () => {
                               onChange={(e) => updateColorCondition(idx, 'reference', e.target.value.trim())}
                               className="w-40 px-2 py-1 text-xs font-mono bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
                             />
+                            {/* Sold / Available toggle */}
+                            <button
+                              type="button"
+                              title={fc.qty === 0 ? 'Marquer comme disponible (retour client)' : 'Marquer comme vendu'}
+                              onClick={() => setFormColors(prev => prev.map((c, i) => i === idx ? { ...c, qty: c.qty === 0 ? 1 : 0 } : c))}
+                              className={cn(
+                                'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold border transition-all',
+                                fc.qty === 0
+                                  ? 'bg-red-50 text-red-600 border-red-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-300'
+                                  : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200'
+                              )}
+                            >
+                              {fc.qty === 0
+                                ? <><ShoppingCart size={11} /> Vendu</>
+                                : <><RotateCcw size={11} /> Dispo</>}
+                            </button>
                             <button
                               type="button"
                               onClick={() => removeColorFromForm(idx)}
