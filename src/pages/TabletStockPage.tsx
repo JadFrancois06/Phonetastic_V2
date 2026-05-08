@@ -56,6 +56,7 @@ export const TabletStockPage = () => {
 
   const [search, setSearch] = useState('');
   const [conditionFilter, setConditionFilter] = useState<'All' | 'Neuf' | 'Occasion'>('All');
+  const [storageFilter, setStorageFilter] = useState('All');
   const [priceMin, setPriceMin] = useState('');
   const [priceMax, setPriceMax] = useState('');
   const [sourceStore, setSourceStore] = useState('');
@@ -214,6 +215,20 @@ export const TabletStockPage = () => {
 
   const sourcePhones = inventory.filter(phone => phone.store === sourceStore);
 
+  // Collect all storage values present in source inventory for the filter buttons
+  const availableStorages = useMemo(() => {
+    const vals = new Set<string>();
+    sourcePhones.forEach(p => {
+      if (p.colors && p.colors.length > 0) {
+        p.colors.forEach(c => { if (c.storage) vals.add(c.storage); });
+      } else if (p.storage) {
+        vals.add(p.storage);
+      }
+    });
+    // Sort numerically by parsing the leading number (e.g. "128 Go" → 128)
+    return Array.from(vals).sort((a, b) => parseInt(a) - parseInt(b));
+  }, [sourcePhones]);
+
   const minParsed = priceMin.trim() === '' ? null : Number(priceMin);
   const maxParsed = priceMax.trim() === '' ? null : Number(priceMax);
   const hasMin = minParsed !== null && Number.isFinite(minParsed);
@@ -232,6 +247,13 @@ export const TabletStockPage = () => {
       (phone.colors?.some(c => c.reference?.toLowerCase().includes(term)) ?? false)
     );
     if (!matchesSearch) return false;
+
+    if (storageFilter !== 'All') {
+      const storages = phone.colors && phone.colors.length > 0
+        ? phone.colors.filter(c => c.qty > 0).map(c => c.storage || phone.storage)
+        : [phone.storage];
+      if (!storages.some(s => s === storageFilter)) return false;
+    }
 
     if (hasMin || hasMax) {
       const prices = getFilterPrices(phone);
@@ -421,6 +443,38 @@ export const TabletStockPage = () => {
               <span className="font-bold text-slate-900">{inStockCount}</span> disponibles / <span className="font-bold text-slate-900">{sortedPhones.length}</span> modèles
             </span>
           </div>
+
+          {/* Storage filter row */}
+          {availableStorages.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-slate-100">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider shrink-0">Stockage :</span>
+              <button
+                onClick={() => setStorageFilter('All')}
+                className={cn(
+                  'px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors',
+                  storageFilter === 'All'
+                    ? 'bg-violet-600 text-white border-violet-600'
+                    : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+                )}
+              >
+                Tous
+              </button>
+              {availableStorages.map(s => (
+                <button
+                  key={s}
+                  onClick={() => setStorageFilter(storageFilter === s ? 'All' : s)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors',
+                    storageFilter === s
+                      ? 'bg-violet-600 text-white border-violet-600'
+                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {sortedPhones.length > 0 ? (
