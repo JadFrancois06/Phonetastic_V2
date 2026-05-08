@@ -36,6 +36,19 @@ const getPriceDisplay = (phone: Phone) => {
   return `${phone.price}€`;
 };
 
+const getFilterPrices = (phone: Phone): number[] => {
+  if (phone.colors && phone.colors.length > 0) {
+    const prices = phone.colors
+      .filter(c => c.qty > 0)
+      .map(c => Number(c.price))
+      .filter(p => Number.isFinite(p) && p >= 0);
+    if (prices.length > 0) return prices;
+  }
+
+  const basePrice = Number(phone.price);
+  return Number.isFinite(basePrice) && basePrice >= 0 ? [basePrice] : [];
+};
+
 export const TabletStockPage = () => {
   const navigate = useNavigate();
   const { storeName } = useParams();
@@ -43,6 +56,8 @@ export const TabletStockPage = () => {
 
   const [search, setSearch] = useState('');
   const [conditionFilter, setConditionFilter] = useState<'All' | 'Neuf' | 'Occasion'>('All');
+  const [priceMin, setPriceMin] = useState('');
+  const [priceMax, setPriceMax] = useState('');
   const [sourceStore, setSourceStore] = useState('');
   const [phoneLocks, setPhoneLocks] = useState<Record<string, PhoneReservationLock>>({});
 
@@ -199,17 +214,33 @@ export const TabletStockPage = () => {
 
   const sourcePhones = inventory.filter(phone => phone.store === sourceStore);
 
+  const minParsed = priceMin.trim() === '' ? null : Number(priceMin);
+  const maxParsed = priceMax.trim() === '' ? null : Number(priceMax);
+  const hasMin = minParsed !== null && Number.isFinite(minParsed);
+  const hasMax = maxParsed !== null && Number.isFinite(maxParsed);
+  const priceLowerBound = hasMin && hasMax ? Math.min(minParsed!, maxParsed!) : (hasMin ? minParsed! : Number.NEGATIVE_INFINITY);
+  const priceUpperBound = hasMin && hasMax ? Math.max(minParsed!, maxParsed!) : (hasMax ? maxParsed! : Number.POSITIVE_INFINITY);
+
   const filteredPhones = sourcePhones.filter(phone => {
     if (conditionFilter !== 'All' && phone.condition !== conditionFilter) return false;
     const term = search.trim().toLowerCase();
-    if (!term) return true;
-    return (
+    const matchesSearch = !term || (
       phone.brand.toLowerCase().includes(term) ||
       phone.model.toLowerCase().includes(term) ||
       phone.storage.toLowerCase().includes(term) ||
       phone.ram.toLowerCase().includes(term) ||
       (phone.colors?.some(c => c.reference?.toLowerCase().includes(term)) ?? false)
     );
+    if (!matchesSearch) return false;
+
+    if (hasMin || hasMax) {
+      const prices = getFilterPrices(phone);
+      if (prices.length === 0) return false;
+      const matchesPrice = prices.some(p => p >= priceLowerBound && p <= priceUpperBound);
+      if (!matchesPrice) return false;
+    }
+
+    return true;
   });
 
   const sortedPhones = [...filteredPhones].sort((a, b) => {
@@ -365,6 +396,27 @@ export const TabletStockPage = () => {
                 {c === 'All' ? 'Tous' : c}
               </button>
             ))}
+            <div className="flex items-center gap-2 ml-1">
+              <input
+                type="number"
+                min="0"
+                step="1"
+                placeholder="Prix min €"
+                value={priceMin}
+                onChange={(e) => setPriceMin(e.target.value)}
+                className="w-32 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-400"
+              />
+              <span className="text-xs text-slate-400">-</span>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                placeholder="Prix max €"
+                value={priceMax}
+                onChange={(e) => setPriceMax(e.target.value)}
+                className="w-32 px-3 py-1.5 border border-slate-200 rounded-lg text-xs font-semibold text-slate-700 focus:outline-none focus:border-indigo-400"
+              />
+            </div>
             <span className="ml-auto text-xs text-slate-500">
               <span className="font-bold text-slate-900">{inStockCount}</span> disponibles / <span className="font-bold text-slate-900">{sortedPhones.length}</span> modèles
             </span>
