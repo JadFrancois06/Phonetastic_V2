@@ -276,6 +276,13 @@ export const AdminInventoryPage = () => {
     }
   };
 
+  // Calculate stock by brand
+  const getStockByBrand = (brandName: string) => {
+    return inventory
+      .filter(p => p.brand === brandName && (!isEmployee || currentUser?.stores.includes(p.store)))
+      .reduce((sum, p) => sum + (p.quantity > 0 ? p.quantity : 0), 0);
+  };
+
   const totalStock = filteredInventory.reduce((s, p) => s + p.quantity, 0);
   const neufCount = filteredInventory.filter(p => p.condition === 'Neuf').reduce((s, p) => s + p.quantity, 0);
   const occasionCount = filteredInventory.filter(p => p.condition === 'Occasion').reduce((s, p) => s + p.quantity, 0);
@@ -321,7 +328,37 @@ export const AdminInventoryPage = () => {
           </div>
         </div>
 
-        {/* ═══ Brand Tabs ═══ */}
+        {/* ═══ Stock Distribution by Brand ═══ */}
+        {brands.length > 0 && (
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Distribution du stock par marque</h2>
+              <span className="text-xs text-slate-400 font-medium">{brands.length} marques</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+              {brands.map(brand => {
+                const brandStock = getStockByBrand(brand.name);
+                const percentage = totalStock > 0 ? Math.round((brandStock / totalStock) * 100) : 0;
+                return (
+                  <div key={brand.id} className="p-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 hover:shadow-md transition-all">
+                    <p className="text-sm font-bold text-slate-900">{brand.name}</p>
+                    <div className="mt-2">
+                      <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
+                        <div 
+                          className="h-full bg-gradient-to-r from-indigo-500 to-indigo-600 transition-all"
+                          style={{ width: `${percentage}%` }}
+                        />
+                      </div>
+                      <p className="mt-2 text-2xl font-black text-indigo-600">{brandStock}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">{percentage}% du total</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-center gap-1.5 overflow-x-scroll pb-2 scrollbar-thin" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 #f1f5f9' }}>
           <button
             onClick={() => setActiveBrandTab('All')}
@@ -332,18 +369,29 @@ export const AdminInventoryPage = () => {
           >
             Toutes
           </button>
-          {brands.map(brand => (
-            <button
-              key={brand.id}
-              onClick={() => setActiveBrandTab(brand.name)}
-              className={cn(
-                'px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap transition-all',
-                activeBrandTab === brand.name ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25' : 'bg-white text-slate-500 border border-slate-200/80 hover:text-slate-700 hover:border-slate-300'
-              )}
-            >
-              {brand.name}
-            </button>
-          ))}
+          {brands.map(brand => {
+            const brandStock = getStockByBrand(brand.name);
+            return (
+              <button
+                key={brand.id}
+                onClick={() => setActiveBrandTab(brand.name)}
+                className={cn(
+                  'px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-2',
+                  activeBrandTab === brand.name ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25' : 'bg-white text-slate-500 border border-slate-200/80 hover:text-slate-700 hover:border-slate-300'
+                )}
+              >
+                {brand.name}
+                <span className={cn(
+                  'px-2 py-0.5 rounded-full text-xs font-bold',
+                  activeBrandTab === brand.name 
+                    ? 'bg-white/30 text-white' 
+                    : 'bg-slate-100 text-slate-600'
+                )}>
+                  {brandStock}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
         {/* ═══ Filters & Actions ═══ */}
