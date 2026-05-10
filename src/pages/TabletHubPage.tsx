@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { TabletLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { cn } from '../lib/utils';
-import { MessageSquare, Package, ArrowLeftRight, ArrowRight } from 'lucide-react';
+import { MessageSquare, Package, ArrowLeftRight, ArrowRight, BarChart3 } from 'lucide-react';
 
 export const TabletHubPage = () => {
   const navigate = useNavigate();
@@ -39,7 +39,7 @@ export const TabletHubPage = () => {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <button
             onClick={() => {
               setCurrentStore(activeStore);
@@ -56,6 +56,27 @@ export const TabletHubPage = () => {
             <h2 className="mt-4 text-xl font-black text-slate-900">Stock</h2>
             <p className="mt-1 text-sm text-slate-500">Consulter le stock du magasin opposé et envoyer des demandes de transfert avec réservation.</p>
             <div className="mt-4 flex items-center gap-2 text-indigo-700 font-bold text-sm">
+              Ouvrir
+              <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </button>
+
+          <button
+            onClick={() => {
+              setCurrentStore(activeStore);
+              navigate(`/tablet/stats/${encodeURIComponent(activeStore)}`);
+            }}
+            className={cn(
+              'group rounded-2xl p-6 text-left border-2 border-slate-200 bg-gradient-to-br from-white to-purple-50',
+              'hover:border-purple-400 hover:shadow-xl transition-all'
+            )}
+          >
+            <div className="h-12 w-12 rounded-2xl bg-purple-100 text-purple-700 border border-purple-200 flex items-center justify-center">
+              <BarChart3 size={24} />
+            </div>
+            <h2 className="mt-4 text-xl font-black text-slate-900">Statistiques</h2>
+            <p className="mt-1 text-sm text-slate-500">Consulter les statistiques du stock par magasin et par condition.</p>
+            <div className="mt-4 flex items-center gap-2 text-purple-700 font-bold text-sm">
               Ouvrir
               <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
             </div>

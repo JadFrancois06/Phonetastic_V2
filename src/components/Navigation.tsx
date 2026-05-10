@@ -40,6 +40,7 @@ const adminItems: SidebarItem[] = [
   { label: 'Registres employés', href: '/admin/records', icon: ClipboardList, group: 'Gestion' },
   { label: 'Rapports mensuels', href: '/admin/reports', icon: FileText, group: 'Gestion' },
   { label: 'Stock', href: '/admin/inventory', icon: Package, group: 'Inventaire' },
+  { label: 'Statistiques', href: '/admin/stats', icon: BarChart3, group: 'Inventaire' },
   { label: 'Pièces détachées', href: '/admin/spare-parts', icon: Wrench, group: 'Inventaire' },
   { label: 'Messages', href: '/admin/chat', icon: MessageSquare, group: 'Communication' },
   { label: 'Factures M2', href: '/admin/invoice-editor_m1', icon: FileText, group: 'Facturation' },
@@ -53,6 +54,7 @@ const employeeItems: SidebarItem[] = [
   { label: 'Historique', href: '/employee/history', icon: History, group: 'Suivi' },
   { label: 'Mes heures', href: '/employee/hours', icon: BarChart3, group: 'Suivi' },
   { label: 'Stock', href: '/employee/inventory', icon: Package, group: 'Inventaire' },
+  { label: 'Statistiques', href: '/employee/stats', icon: BarChart3, group: 'Inventaire' },
   { label: 'Pièces détachées', href: '/employee/spare-parts', icon: Wrench, group: 'Inventaire' },
   { label: 'Messages', href: '/employee/chat', icon: MessageSquare, group: 'Communication' },
 ];

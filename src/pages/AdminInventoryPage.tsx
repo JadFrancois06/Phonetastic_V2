@@ -276,7 +276,6 @@ export const AdminInventoryPage = () => {
     }
   };
 
-  // Calculate stock by brand
   const getStockByBrand = (brandName: string) => {
     return inventory
       .filter(p => p.brand === brandName && (!isEmployee || currentUser?.stores.includes(p.store)))
@@ -327,37 +326,6 @@ export const AdminInventoryPage = () => {
             <div className="absolute -right-4 -bottom-4 h-20 w-20 rounded-full bg-white/10" />
           </div>
         </div>
-
-        {/* ═══ Stock Distribution by Brand ═══ */}
-        {brands.length > 0 && (
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 md:p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Distribution du stock par marque</h2>
-              <span className="text-xs text-slate-400 font-medium">{brands.length} marques</span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-              {brands.map(brand => {
-                const brandStock = getStockByBrand(brand.name);
-                const percentage = totalStock > 0 ? Math.round((brandStock / totalStock) * 100) : 0;
-                return (
-                  <div key={brand.id} className="p-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-slate-100 hover:shadow-md transition-all">
-                    <p className="text-sm font-bold text-slate-900">{brand.name}</p>
-                    <div className="mt-2">
-                      <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
-                        <div 
-                          className="h-full bg-gradient-to-r from-indigo-500 to-indigo-600 transition-all"
-                          style={{ width: `${percentage}%` }}
-                        />
-                      </div>
-                      <p className="mt-2 text-2xl font-black text-indigo-600">{brandStock}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{percentage}% du total</p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
 
         <div className="flex items-center gap-1.5 overflow-x-scroll pb-2 scrollbar-thin" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 #f1f5f9' }}>
           <button
