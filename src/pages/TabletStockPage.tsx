@@ -49,6 +49,189 @@ const getFilterPrices = (phone: Phone): number[] => {
   return Number.isFinite(basePrice) && basePrice >= 0 ? [basePrice] : [];
 };
 
+const addMonths = (date: Date, months: number) => {
+  const d = new Date(date);
+  d.setMonth(d.getMonth() + months);
+  return d;
+};
+
+const formatDateFR = (date: Date) => date.toLocaleDateString('fr-FR');
+
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
+const getColorDisplayName = (color?: string) => {
+  if (!color) return '-';
+  const normalized = color.trim().toUpperCase();
+  const colorNames: Record<string, string> = {
+    '#000000': 'Noir',
+    '#FFFFFF': 'Blanc',
+    '#C0C0C0': 'Argent',
+    '#FFD700': 'Or',
+    '#1E90FF': 'Bleu',
+    '#DC143C': 'Rouge',
+    '#2E8B57': 'Vert',
+    '#9370DB': 'Violet',
+    '#FF69B4': 'Rose',
+    '#FF8C00': 'Orange',
+  };
+  return colorNames[normalized] || color;
+};
+
+const getWarrantyLogoByStore = (store: string) => {
+  const normalized = store.toLowerCase();
+  if (/\b1\b/.test(normalized)) return '/assets/logo2.png';
+  return '/assets/logo.png';
+};
+
+const openWarrantyVoucher = (params: {
+  brand: string;
+  model: string;
+  ram: string;
+  storage: string;
+  condition: 'Neuf' | 'Occasion';
+  color?: string;
+  reference?: string;
+  price: number;
+  soldAt: Date;
+  store: string;
+}) => {
+  const durationMonths = params.condition === 'Neuf' ? 12 : 6;
+  const warrantyEnd = addMonths(params.soldAt, durationMonths);
+  const conditionLabel = params.condition === 'Neuf' ? 'Appareil neuf' : 'Appareil d\'occasion';
+  const warningText = 'Attention : en cas de perte de ce bon, la garantie ne pourra pas etre appliquee.';
+  const logoUrl = new URL(getWarrantyLogoByStore(params.store), window.location.origin).toString();
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Bon de garantie</title>
+  <style>
+    @page { size: A4; margin: 10mm; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      font-family: Arial, sans-serif;
+      color: #0f172a;
+      margin: 0;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .card {
+      width: 100%;
+      min-height: calc(297mm - 20mm);
+      box-sizing: border-box;
+      border: 2px solid #0f172a;
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .top-block { display: flex; flex-direction: column; gap: 14px; }
+    .bottom-block { display: flex; flex-direction: column; gap: 14px; }
+    .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; }
+    .logo-wrap { display: flex; align-items: center; gap: 12px; }
+    .logo { width: 68px; height: 68px; object-fit: contain; }
+    .title { font-size: 26px; font-weight: 800; letter-spacing: 0.4px; }
+    .subtitle { color: #334155; font-size: 13px; margin-top: 4px; }
+    .section-title { margin: 18px 0 8px; font-size: 13px; color: #334155; text-transform: uppercase; letter-spacing: 0.7px; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 18px; }
+    .line { border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; }
+    .label { font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 0.4px; }
+    .value { font-size: 15px; font-weight: 700; color: #0f172a; margin-top: 2px; }
+    .paid { margin-top: 18px; padding: 14px; border-radius: 10px; background: #ecfdf5; border: 1px solid #10b981; }
+    .paid .amount { font-size: 28px; font-weight: 900; color: #047857; }
+    .warn { margin-top: 20px; border: 1px solid #ef4444; background: #fef2f2; color: #991b1b; padding: 12px; border-radius: 10px; font-size: 13px; font-weight: 700; }
+    .foot { margin-top: 16px; font-size: 12px; color: #334155; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="top-block">
+      <div class="top">
+        <div class="logo-wrap">
+          <img class="logo" src="${escapeHtml(logoUrl)}" alt="Logo" />
+          <div>
+            <div class="title">BON DE GARANTIE</div>
+            <div class="subtitle">Document client - a presenter pour toute reclamation</div>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <div class="label">Date d'achat</div>
+          <div class="value">${escapeHtml(formatDateFR(params.soldAt))}</div>
+        </div>
+      </div>
+
+      <div class="section-title">Details appareil</div>
+      <div class="grid">
+        <div class="line"><div class="label">Marque / Modele</div><div class="value">${escapeHtml(`${params.brand} ${params.model}`)}</div></div>
+        <div class="line"><div class="label">Etat</div><div class="value">${escapeHtml(conditionLabel)}</div></div>
+        <div class="line"><div class="label">RAM / Stockage</div><div class="value">${escapeHtml(`${params.ram} / ${params.storage}`)}</div></div>
+        <div class="line"><div class="label">Couleur</div><div class="value">${escapeHtml(getColorDisplayName(params.color))}</div></div>
+        <div class="line"><div class="label">IMEI / Reference</div><div class="value">${escapeHtml(params.reference || '-')}</div></div>
+        <div class="line"><div class="label">Magasin</div><div class="value">${escapeHtml(params.store)}</div></div>
+        <div class="line"><div class="label">Duree de garantie</div><div class="value">${durationMonths} mois</div></div>
+        <div class="line"><div class="label">Fin de garantie</div><div class="value">${escapeHtml(formatDateFR(warrantyEnd))}</div></div>
+      </div>
+    </div>
+
+    <div class="bottom-block">
+      <div class="paid">
+        <div class="label">Montant total paye</div>
+        <div class="amount">${Number(params.price).toFixed(2)} EUR</div>
+      </div>
+
+      <div class="warn">${warningText}</div>
+
+      <div class="foot">
+        Garantie commerciale: ${durationMonths} mois a compter de la date d'achat (${escapeHtml(formatDateFR(params.soldAt))}).
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      let printed = false;
+      const triggerPrint = () => {
+        if (printed) return;
+        printed = true;
+        setTimeout(() => window.print(), 120);
+      };
+
+      const img = document.querySelector('.logo');
+      if (!img) {
+        triggerPrint();
+        return;
+      }
+
+      if (img.complete) {
+        triggerPrint();
+        return;
+      }
+
+      img.addEventListener('load', triggerPrint, { once: true });
+      img.addEventListener('error', triggerPrint, { once: true });
+      setTimeout(triggerPrint, 1500);
+    })();
+  </script>
+</body>
+</html>`;
+
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('Impossible d\'ouvrir le bon de garantie. Autorisez les popups puis reessayez.');
+    return;
+  }
+  win.document.write(html);
+  win.document.close();
+};
+
 export const TabletStockPage = () => {
   const navigate = useNavigate();
   const { storeName } = useParams();
@@ -174,10 +357,12 @@ export const TabletStockPage = () => {
     if (!sellingPhone || !currentUser) return;
     const finalPrice = Number(sellPrice) || 0;
     let updatedColors = sellingPhone.colors ? [...sellingPhone.colors] : [];
+    let soldColor: PhoneColor | undefined;
     let colorName = '';
     let colorRef: string | undefined;
     if (updatedColors.length > 0) {
       const col = updatedColors[sellColorIndex];
+      soldColor = col;
       colorName = col?.color || '';
       colorRef = col?.reference;
       updatedColors = updatedColors.map((c, i) =>
@@ -210,6 +395,20 @@ export const TabletStockPage = () => {
       soldByName: soldByName,
       soldAt: new Date().toISOString(),
     });
+
+    openWarrantyVoucher({
+      brand: sellingPhone.brand,
+      model: sellingPhone.model,
+      ram: soldColor?.ram || sellingPhone.ram,
+      storage: soldColor?.storage || sellingPhone.storage,
+      condition: (soldColor?.condition || sellingPhone.condition) as 'Neuf' | 'Occasion',
+      color: colorName || soldColor?.color,
+      reference: colorRef,
+      price: finalPrice,
+      soldAt: new Date(),
+      store: sellingPhone.store,
+    });
+
     setSellConfirmed(true);
   };
 
