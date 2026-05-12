@@ -33,6 +33,8 @@ import {
   fetchSalesFromDB,
   insertSaleToDB,
   clearAllSalesFromDB,
+  updateBrandInDB,
+  renameBrandOnPhonesInDB,
 } from './lib/authService';
 
 // Simple global state simulation using a custom hook pattern
@@ -316,6 +318,18 @@ export const useStore = () => {
     deleteBrandFromDB(id);
   };
 
+  const updateBrand = (id: string, newName: string) => {
+    const old = globalBrands.find(b => b.id === id);
+    if (!old) return;
+    const oldName = old.name;
+    globalBrands = globalBrands.map(b => b.id === id ? { ...b, name: newName } : b);
+    globalInventory = globalInventory.map(p => p.brand === oldName ? { ...p, brand: newName } : p);
+    notify();
+    // Update brands table + all phones with that brand in one batch query
+    updateBrandInDB(id, newName);
+    renameBrandOnPhonesInDB(oldName, newName);
+  };
+
   const addBrandSeries = (brandName: string, seriesName: string) => {
     const tempId = Math.random().toString(36).substr(2, 9);
     globalBrandSeries = [...globalBrandSeries, { id: tempId, brandName, seriesName }];
@@ -473,6 +487,7 @@ export const useStore = () => {
     deleteStore,
     addBrand,
     deleteBrand,
+    updateBrand,
     addBrandSeries,
     updateBrandSeries,
     deleteBrandSeriesItem,

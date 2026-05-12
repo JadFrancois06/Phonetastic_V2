@@ -11,7 +11,7 @@ const RAM_OPTIONS = ['2 Go', '3 Go', '4 Go', '6 Go', '8 Go', '12 Go', '16 Go', '
 const STORAGE_OPTIONS = ['32 Go', '64 Go', '128 Go', '256 Go', '512 Go', '1 To'];
 
 export const AdminInventoryPage = () => {
-  const { inventory, stores, brands, addPhone, updatePhone, deletePhone, addBrand, deleteBrand, currentUser } = useStore();
+  const { inventory, stores, brands, addPhone, updatePhone, deletePhone, addBrand, deleteBrand, updateBrand, currentUser } = useStore();
 
   // Strict permission check: employees must have canAccessInventory permission
   if (currentUser && currentUser.role !== 'Administrateur' && !currentUser.permissions?.canAccessInventory) {
@@ -40,6 +40,8 @@ export const AdminInventoryPage = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isBrandModalOpen, setIsBrandModalOpen] = useState(false);
   const [newBrandName, setNewBrandName] = useState('');
+  const [editingBrandId, setEditingBrandId] = useState<string | null>(null);
+  const [editingBrandName, setEditingBrandName] = useState('');
   
   const [editingPhone, setEditingPhone] = useState<Phone | null>(null);
   const [formColors, setFormColors] = useState<PhoneColor[]>([]);
@@ -875,20 +877,69 @@ export const AdminInventoryPage = () => {
                 <div className="rounded-xl border border-slate-200/80 overflow-hidden">
                   <ul className="divide-y divide-slate-50 max-h-60 overflow-y-auto">
                     {brands.map(b => (
-                      <li key={b.id} className="px-4 py-3 flex justify-between items-center hover:bg-slate-50/60 transition-colors">
-                        <span className="text-sm font-semibold text-slate-700">{b.name}</span>
-                        <button
-                          onClick={() => {
-                            setConfirmDialog({
-                              message: `Êtes-vous sûr de vouloir supprimer la marque ${b.name} ?`,
-                              onConfirm: () => { deleteBrand(b.id); setConfirmDialog(null); }
-                            });
-                          }}
-                          className="p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Supprimer"
-                        >
-                          <Trash2 size={15} />
-                        </button>
+                      <li key={b.id} className="px-4 py-3 flex justify-between items-center hover:bg-slate-50/60 transition-colors gap-2">
+                        {editingBrandId === b.id ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            className="flex-1 px-2 py-1 border border-indigo-400 rounded-lg text-sm font-semibold focus:outline-none"
+                            value={editingBrandName}
+                            onChange={e => setEditingBrandName(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && editingBrandName.trim()) {
+                                updateBrand(b.id, editingBrandName.trim());
+                                setEditingBrandId(null);
+                              }
+                              if (e.key === 'Escape') setEditingBrandId(null);
+                            }}
+                          />
+                        ) : (
+                          <span className="text-sm font-semibold text-slate-700 flex-1">{b.name}</span>
+                        )}
+                        <div className="flex items-center gap-1 shrink-0">
+                          {editingBrandId === b.id ? (
+                            <>
+                              <button
+                                onClick={() => {
+                                  if (editingBrandName.trim()) {
+                                    updateBrand(b.id, editingBrandName.trim());
+                                    setEditingBrandId(null);
+                                  }
+                                }}
+                                disabled={!editingBrandName.trim()}
+                                className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                              >
+                                Sauv.
+                              </button>
+                              <button
+                                onClick={() => setEditingBrandId(null)}
+                                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                              >
+                                <X size={14} />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => { setEditingBrandId(b.id); setEditingBrandName(b.name); }}
+                              className="p-1.5 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                              title="Modifier"
+                            >
+                              <Edit2 size={15} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setConfirmDialog({
+                                message: `Êtes-vous sûr de vouloir supprimer la marque ${b.name} ?`,
+                                onConfirm: () => { deleteBrand(b.id); setConfirmDialog(null); }
+                              });
+                            }}
+                            className="p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Supprimer"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
                       </li>
                     ))}
                     {brands.length === 0 && (

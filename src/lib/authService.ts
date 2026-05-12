@@ -343,6 +343,16 @@ export async function deleteBrandFromDB(id: string): Promise<void> {
   await supabase.from('brands').delete().eq('id', id);
 }
 
+export async function updateBrandInDB(id: string, name: string): Promise<void> {
+  const { error } = await supabase.from('brands').update({ name }).eq('id', id);
+  if (error) console.error('[updateBrandInDB]', error.message);
+}
+
+export async function renameBrandOnPhonesInDB(oldName: string, newName: string): Promise<void> {
+  const { error } = await supabase.from('phones').update({ brand: newName }).eq('brand', oldName);
+  if (error) console.error('[renameBrandOnPhonesInDB]', error.message);
+}
+
 // ── BRAND SERIES ────────────────────────────────────────
 export async function fetchBrandSeriesFromDB(): Promise<import('../types').BrandSeries[]> {
   const { data, error } = await supabase
