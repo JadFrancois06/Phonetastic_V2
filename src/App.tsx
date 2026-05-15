@@ -28,6 +28,7 @@ import { TabletStoresPage } from './pages/TabletStoresPage';
 import { TabletHubPage } from './pages/TabletHubPage';
 import { TabletStockPage } from './pages/TabletStockPage';
 import { StatsPage } from './pages/StatsPage';
+import { SalesArchivePage } from './pages/SalesArchivePage';
 
 
 export default function App() {
@@ -49,6 +50,7 @@ export default function App() {
         <Route path="/admin/inventory" element={<AdminInventoryPage />} />
         <Route path="/admin/spare-parts" element={<AdminSparePartsPage />} />
         <Route path="/admin/stats" element={<StatsPage />} />
+        <Route path="/admin/sales-archive" element={<SalesArchivePage />} />
         <Route path="/admin/records" element={<EmployeeRecordsListPage />} />
         <Route path="/admin/employee/:id" element={<EmployeeRecordPage />} />
         <Route path="/admin/invoice-editor_m1" element={<InvoiceEditorM1 />} />
@@ -63,6 +65,7 @@ export default function App() {
         <Route path="/employee/inventory" element={<EmployeeInventoryPage />} />
         <Route path="/employee/spare-parts" element={<EmployeeSparePartsPage />} />
         <Route path="/employee/stats" element={<StatsPage />} />
+        <Route path="/employee/sales-archive" element={<SalesArchivePage />} />
         <Route path="/employee/chat" element={<ChatPage />} />
 
         {/* Stock / Tablet Routes */}
@@ -71,6 +74,7 @@ export default function App() {
         <Route path="/tablet/stock/:storeName" element={<TabletStockPage />} />
         <Route path="/tablet/stats/:storeName" element={<StatsPage />} />
         <Route path="/tablet/chat/:storeName" element={<ChatPage />} />
+        <Route path="/tablet/sales/:storeName" element={<SalesArchivePage />} />
         <Route path="/tablet/stock" element={<Navigate to="/tablet/stores" replace />} />
 
         {/* Default Redirect */}

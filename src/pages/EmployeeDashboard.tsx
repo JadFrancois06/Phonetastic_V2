@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { EmployeeLayout } from '../components/Layouts';
-import { Timer, BarChart3, Clock, Wallet, Store, ChevronRight, ArrowRight } from 'lucide-react';
+import { Timer, BarChart3, Clock, Wallet, Store, ChevronRight, ArrowRight, Archive } from 'lucide-react';
 import { useStore } from '../store';
 import { cn, formatHours } from '../lib/utils';
 
@@ -84,7 +84,7 @@ export const EmployeeDashboard = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Pointage Quick Access */}
           <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-8 flex flex-col items-center justify-center text-center space-y-6">
             <div className="h-20 w-20 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 flex items-center justify-center text-white shadow-xl shadow-indigo-600/30">
@@ -99,6 +99,24 @@ export const EmployeeDashboard = () => {
               className="w-full h-12 text-base font-medium text-white bg-gradient-to-r from-indigo-600 to-indigo-700 rounded-xl hover:from-indigo-700 hover:to-indigo-800 shadow-lg shadow-indigo-600/25 transition-all inline-flex items-center justify-center gap-2 cursor-pointer"
             >
               Aller au Pointage
+              <ArrowRight size={18} />
+            </button>
+          </div>
+
+          {/* Sales Archive Quick Access */}
+          <div className="bg-white rounded-2xl border border-slate-200/60 shadow-sm p-8 flex flex-col items-center justify-center text-center space-y-6">
+            <div className="h-20 w-20 rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center text-white shadow-xl shadow-emerald-600/30">
+              <Archive size={40} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-xl font-bold text-slate-900">Archive des ventes</h3>
+              <p className="text-slate-500 text-sm max-w-xs mx-auto">Consulter l'historique des téléphones vendus et les détails des ventes.</p>
+            </div>
+            <button
+              onClick={() => navigate('/employee/sales-archive')}
+              className="w-full h-12 text-base font-medium text-white bg-gradient-to-r from-emerald-600 to-emerald-700 rounded-xl hover:from-emerald-700 hover:to-emerald-800 shadow-lg shadow-emerald-600/25 transition-all inline-flex items-center justify-center gap-2 cursor-pointer"
+            >
+              Voir l'Archive
               <ArrowRight size={18} />
             </button>
           </div>

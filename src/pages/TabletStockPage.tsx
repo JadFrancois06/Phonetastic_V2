@@ -4,7 +4,7 @@ import { TabletLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { cn } from '../lib/utils';
 import { Phone, PhoneColor } from '../types';
-import { Package, Search, Send, X, ChevronLeft, Store, ShoppingCart, CheckCircle2, Eye } from 'lucide-react';
+import { Package, Search, Send, X, ChevronLeft, Store, ShoppingCart, CheckCircle2, Eye, Loader2 } from 'lucide-react';
 import ReactBarcode from 'react-barcode';
 import {
   fetchPhoneReservationLocksFromDB,
@@ -235,7 +235,17 @@ const openWarrantyVoucher = (params: {
 export const TabletStockPage = () => {
   const navigate = useNavigate();
   const { storeName } = useParams();
-  const { currentUser, setCurrentStore, inventory, users, stores, attendance, updatePhone, addSale } = useStore();
+  const {
+    currentUser,
+    setCurrentStore,
+    users,
+    stores,
+    attendance,
+    updatePhone,
+    addSale,
+    sales,
+    getEffectiveInventory,
+  } = useStore();
 
   const [search, setSearch] = useState('');
   const [conditionFilter, setConditionFilter] = useState<'All' | 'Neuf' | 'Occasion'>('All');
@@ -257,6 +267,7 @@ export const TabletStockPage = () => {
   const [sellPrice, setSellPrice] = useState('');
   const [sellConfirmed, setSellConfirmed] = useState(false);
   const [sellEmployeeId, setSellEmployeeId] = useState('');
+  const [archivingUnitKey, setArchivingUnitKey] = useState<string | null>(null);
 
   // Detail modal state
   const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
@@ -353,6 +364,58 @@ export const TabletStockPage = () => {
     setSellEmployeeId('');
   };
 
+  const isSoldUnitAlreadyArchived = (phone: Phone, color: PhoneColor) => {
+    if (color.reference) {
+      return sales.some(s => s.reference === color.reference && s.store === phone.store);
+    }
+
+    return sales.some(s => (
+      s.store === phone.store &&
+      s.phoneBrand === phone.brand &&
+      s.phoneModel === phone.model &&
+      s.color === (color.color || '') &&
+      Number(s.price) === Number(color.price ?? phone.price)
+    ));
+  };
+
+  const archiveSoldUnitToSales = (phone: Phone, colorIndex: number) => {
+    if (!currentUser || !phone.colors || colorIndex < 0 || colorIndex >= phone.colors.length) return;
+
+    const unit = phone.colors[colorIndex];
+    if (!unit || unit.qty > 0) return;
+
+    if (isSoldUnitAlreadyArchived(phone, unit)) return;
+
+    const key = `${phone.id}-${colorIndex}`;
+    setArchivingUnitKey(key);
+
+    addSale({
+      phoneBrand: phone.brand,
+      phoneModel: phone.model,
+      phoneRam: unit.ram || phone.ram,
+      phoneStorage: unit.storage || phone.storage,
+      phoneCondition: (unit.condition || phone.condition) as 'Neuf' | 'Occasion',
+      color: unit.color || '',
+      reference: unit.reference,
+      price: Number(unit.price ?? phone.price ?? 0),
+      store: phone.store,
+      soldBy: currentUser.id,
+      soldByName: currentUser.fullName,
+      soldAt: new Date().toISOString(),
+    });
+
+    const remainingColors = phone.colors.filter((_, idx) => idx !== colorIndex);
+    const nextQty = remainingColors.reduce((sum, c) => sum + (c.qty || 0), 0);
+    updatePhone(phone.id, { colors: remainingColors, quantity: nextQty });
+
+    setDetailPhone(prev => {
+      if (!prev || prev.id !== phone.id) return prev;
+      return { ...prev, colors: remainingColors, quantity: nextQty };
+    });
+
+    setArchivingUnitKey(null);
+  };
+
   const confirmSell = () => {
     if (!sellingPhone || !currentUser) return;
     const finalPrice = Number(sellPrice) || 0;
@@ -412,7 +475,10 @@ export const TabletStockPage = () => {
     setSellConfirmed(true);
   };
 
-  const sourcePhones = inventory.filter(phone => phone.store === sourceStore);
+  const sourcePhones = useMemo(() => {
+    const effectiveInventory = getEffectiveInventory();
+    return effectiveInventory.filter(phone => phone.store === sourceStore);
+  }, [getEffectiveInventory, sourceStore]);
 
   // Collect all storage values present in source inventory for the filter buttons
   const availableStorages = useMemo(() => {
@@ -464,13 +530,15 @@ export const TabletStockPage = () => {
     return true;
   });
 
-  const sortedPhones = [...filteredPhones].sort((a, b) => {
-    const aQty = getAvailableQty(a);
-    const bQty = getAvailableQty(b);
-    if (aQty > 0 && bQty === 0) return -1;
-    if (aQty === 0 && bQty > 0) return 1;
-    return `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`);
-  });
+  const sortedPhones = [...filteredPhones]
+    .sort((a, b) => {
+      const aQty = getAvailableQty(a);
+      const bQty = getAvailableQty(b);
+      if (aQty > 0 && bQty === 0) return -1;
+      if (aQty === 0 && bQty > 0) return 1;
+      return `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`);
+    })
+    .filter(phone => getAvailableQty(phone) > 0); // Hide sold out items
 
   const openRequestModal = (phone: Phone) => {
     if (phoneLocks[phone.id]) return;
@@ -677,7 +745,7 @@ export const TabletStockPage = () => {
         </div>
 
         {sortedPhones.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 gap-5">
             {sortedPhones.map(phone => {
               const qty = getAvailableQty(phone);
               const locked = phoneLocks[phone.id];
@@ -685,18 +753,25 @@ export const TabletStockPage = () => {
                 <div
                   key={phone.id}
                   className={cn(
-                    'rounded-2xl border bg-white p-5 shadow-sm transition-all',
+                    'relative overflow-hidden rounded-2xl border bg-white p-5 shadow-sm transition-all',
                     qty > 0 ? 'border-slate-200 hover:shadow-lg hover:border-slate-300' : 'border-slate-200 opacity-60'
                   )}
                 >
+                  <img
+                    src="/assets/logo.png"
+                    alt="Phonetastic"
+                    className="pointer-events-none select-none absolute right-3 top-16 w-25 h-25 object-contain "
+                    loading="lazy"
+                  />
+
                   {/* Header: brand + model + condition badge */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-base font-black text-slate-900 leading-tight">{phone.brand}</p>
-                      <p className="text-lg font-bold text-slate-700 leading-tight mt-0.5">{phone.model}</p>
+                      <p className="text-5xl font-black text-slate-900 leading-tight">{phone.brand}</p>
+                      <p className="text-4xl font-bold text-slate-700 leading-tight mt-0.5">{phone.model}</p>
                     </div>
                     <span className={cn(
-                      'text-xs font-bold px-3 py-1.5 rounded-xl shrink-0',
+                      'text-lg font-bold px-3 py-1.5 rounded-xl shrink-0',
                       phone.condition === 'Neuf' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
                     )}>
                       {phone.condition}
@@ -705,12 +780,12 @@ export const TabletStockPage = () => {
 
                   {/* Specs row */}
                   <div className="mt-3 flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg">{phone.ram} RAM</span>
-                    <span className="text-sm font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg">{phone.storage}</span>
+                    <span className="text-2xl font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg">{phone.ram} RAM</span>
+                    <span className="text-2xl font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-lg">{phone.storage}</span>
                   </div>
 
                   {/* Price */}
-                  <p className="mt-3 text-3xl font-black text-slate-900">{getPriceDisplay(phone)}</p>
+                  <p className="mt-3 text-5xl font-black text-slate-900">{getPriceDisplay(phone)}</p>
 
                   {/* Per-unit color dots with condition indicators */}
                   <div className="mt-3 flex items-center gap-2 flex-wrap">
@@ -1045,10 +1120,14 @@ export const TabletStockPage = () => {
                 </button>
               </div>
               <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
-                {detailPhone.colors && detailPhone.colors.length > 0 ? detailPhone.colors.map((c, i) => (
+                {detailPhone.colors && detailPhone.colors.length > 0 ? detailPhone.colors.map((c, i) => {
+                  const unitKey = `${detailPhone.id}-${i}`;
+                  const archived = isSoldUnitAlreadyArchived(detailPhone, c);
+                  const isArchiving = archivingUnitKey === unitKey;
+                  return (
                   <div key={i} className={cn(
                     'p-3 rounded-xl border space-y-2',
-                    c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50'
+                    c.qty === 0 ? 'border-red-200 bg-red-50/40' : 'border-slate-100 bg-slate-50'
                   )}>
                     <div className="flex items-center gap-3">
                       <span className="w-10 h-10 rounded-lg border-2 border-slate-200 shrink-0" style={{ backgroundColor: c.color }} />
@@ -1080,78 +1159,21 @@ export const TabletStockPage = () => {
                         <ReactBarcode value={c.reference} format="CODE128" width={1.5} height={35} fontSize={10} margin={2} />
                       </div>
                     )}
-                    {(c.batteryHealth || c.screenCondition || c.frameCondition) && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {c.batteryHealth && <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full font-medium">🔋 {c.batteryHealth}</span>}
-                        {c.screenCondition && <span className="text-[11px] px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full font-medium">📱 {c.screenCondition}</span>}
-                        {c.frameCondition && <span className="text-[11px] px-2 py-0.5 bg-orange-50 text-orange-700 rounded-full font-medium">🛡️ {c.frameCondition}</span>}
-                      </div>
-                    )}
-                    {c.notes && (
-                      <p className="text-[11px] text-slate-600 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5 italic">📝 {c.notes}</p>
-                    )}
-                  </div>
-                )) : (
-                  <p className="text-sm text-slate-500 text-center py-6">Aucun détail disponible.</p>
-                )}
-              </div>
-              <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
-                <span className="text-xs text-slate-500">{detailPhone.quantity} unité(s) au total</span>
-                <button onClick={() => setDetailPhone(null)} className="px-4 py-2 text-sm font-bold text-slate-700 bg-white border-2 border-slate-300 rounded-xl hover:bg-slate-50">
-                  Fermer
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── Unit Detail Modal ──────────────────────────────── */}
-        {detailPhone && (
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm p-4 flex items-center justify-center" onClick={() => setDetailPhone(null)}>
-            <div className="w-full max-w-lg rounded-2xl bg-white border border-slate-200 shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-              <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between">
-                <div>
-                  <p className="text-lg font-black text-slate-900">{detailPhone.brand} {detailPhone.model}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{detailPhone.storage} · {detailPhone.ram} RAM · {detailPhone.store}</p>
-                </div>
-                <button onClick={() => setDetailPhone(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
-                  <X size={20} />
-                </button>
-              </div>
-              <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
-                {detailPhone.colors && detailPhone.colors.length > 0 ? detailPhone.colors.map((c, i) => (
-                  <div key={i} className={cn(
-                    'p-3 rounded-xl border space-y-2',
-                    c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50'
-                  )}>
-                    <div className="flex items-center gap-3">
-                      <span className="w-10 h-10 rounded-lg border-2 border-slate-200 shrink-0" style={{ backgroundColor: c.color }} />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center flex-wrap gap-1.5">
-                          <span className="text-sm font-bold text-slate-900">Unité {i + 1}</span>
-                          <span className={cn(
-                            'text-[10px] font-bold px-2 py-0.5 rounded-full',
-                            (c.condition || detailPhone.condition) === 'Neuf' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
-                          )}>
-                            {c.condition || detailPhone.condition}
-                          </span>
-                          {c.qty === 0 && (
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700">VENDU</span>
+                    {c.qty === 0 && (
+                      <div className="flex items-center justify-end">
+                        <button
+                          onClick={() => archiveSoldUnitToSales(detailPhone, i)}
+                          disabled={archived || isArchiving}
+                          className={cn(
+                            'inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors',
+                            archived
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-not-allowed'
+                              : 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
                           )}
-                          <span className="ml-auto text-sm font-black text-indigo-600">
-                            {c.price ? `${c.price}€` : detailPhone.price > 0 ? `${detailPhone.price}€` : ''}
-                          </span>
-                        </div>
-                        {c.reference && <p className="text-[11px] font-mono text-slate-500">{c.reference}</p>}
-                      </div>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-semibold">{c.ram || detailPhone.ram} RAM</span>
-                      <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded-full font-semibold">{c.storage || detailPhone.storage}</span>
-                    </div>
-                    {c.reference && (
-                      <div className="flex justify-center bg-white rounded-lg p-2 border border-slate-100">
-                        <ReactBarcode value={c.reference} format="CODE128" width={1.5} height={35} fontSize={10} margin={2} />
+                        >
+                          {isArchiving && <Loader2 size={12} className="animate-spin" />}
+                          {archived ? 'Deja archive' : 'Ajouter a l\'archive'}
+                        </button>
                       </div>
                     )}
                     {(c.batteryHealth || c.screenCondition || c.frameCondition) && (
@@ -1165,7 +1187,8 @@ export const TabletStockPage = () => {
                       <p className="text-[11px] text-slate-600 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5 italic">📝 {c.notes}</p>
                     )}
                   </div>
-                )) : (
+                );
+                }) : (
                   <p className="text-sm text-slate-500 text-center py-6">Aucun détail disponible.</p>
                 )}
               </div>

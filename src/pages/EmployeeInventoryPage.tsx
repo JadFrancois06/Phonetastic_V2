@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Navigate, Link } from 'react-router-dom';
 import { EmployeeLayout } from '../components/Layouts';
 import { useStore } from '../store';
-import { Search, Package, ShoppingCart, Send, CheckCircle2, Settings2, Eye, X } from 'lucide-react';
+import { Search, Package, ShoppingCart, Send, CheckCircle2, Settings2, Eye, X, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { PhoneCondition, Phone, PhoneColor, Store } from '../types';
 import { sendMessageToDB, fetchOnlineUsersFromDB, fetchPhoneReservationLocksFromDB, PhoneReservationLock } from '../lib/authService';
@@ -11,7 +11,10 @@ import ReactBarcode from 'react-barcode';
 import { buildPhoneTransferRequestContent } from '../lib/phoneRequestProtocol';
 
 export const EmployeeInventoryPage = () => {
-  const { inventory, currentUser, sellPhone, addSale, brands, users } = useStore();
+  const { inventory, currentUser, sellPhone, addSale, brands, users, getEffectiveInventory, updatePhone, sales } = useStore();
+  
+  // Use effective inventory (subtracts sales from quantity)
+  const effectiveInventory = getEffectiveInventory();
 
   const [searchTerm, setSearchTerm] = useState('');
   const [conditionFilter, setConditionFilter] = useState<PhoneCondition | 'All'>('All');
@@ -35,8 +38,9 @@ export const EmployeeInventoryPage = () => {
 
   // Detail modal state
   const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
+  const [archivingUnitKey, setArchivingUnitKey] = useState<string | null>(null);
 
-  const availableStores = [...new Set(inventory.map(phone => phone.store))].sort();
+  const availableStores = [...new Set(effectiveInventory.map(phone => phone.store))].sort();
 
   const refreshPhoneLocks = async () => {
     const locks = await fetchPhoneReservationLocksFromDB();
@@ -58,7 +62,10 @@ export const EmployeeInventoryPage = () => {
     };
   }, []);
 
-  const filteredInventory = inventory.filter(phone => {
+  const filteredInventory = effectiveInventory.filter(phone => {
+    const hasStock = phone.quantity > 0;
+    if (!hasStock) return false;
+
     const term = searchTerm.toLowerCase();
     const matchesSearch = phone.brand.toLowerCase().includes(term) || 
                           phone.model.toLowerCase().includes(term) ||
@@ -108,6 +115,57 @@ export const EmployeeInventoryPage = () => {
     sellPhone(sellingPhone.id);
     setSellingPhone(null);
     setSellPrice('');
+  };
+
+  const isSoldUnitAlreadyArchived = (phone: Phone, color: PhoneColor) => {
+    if (color.reference) {
+      return sales.some(s => s.reference === color.reference && s.store === phone.store);
+    }
+
+    return sales.some(s => (
+      s.store === phone.store &&
+      s.phoneBrand === phone.brand &&
+      s.phoneModel === phone.model &&
+      s.color === (color.color || '') &&
+      Number(s.price) === Number(color.price ?? phone.price)
+    ));
+  };
+
+  const archiveSoldUnitToSales = (phone: Phone, colorIndex: number) => {
+    if (!currentUser || !phone.colors || colorIndex < 0 || colorIndex >= phone.colors.length) return;
+
+    const unit = phone.colors[colorIndex];
+    if (!unit || unit.qty > 0) return;
+    if (isSoldUnitAlreadyArchived(phone, unit)) return;
+
+    const unitKey = `${phone.id}-${colorIndex}`;
+    setArchivingUnitKey(unitKey);
+
+    addSale({
+      phoneBrand: phone.brand,
+      phoneModel: phone.model,
+      phoneRam: unit.ram || phone.ram,
+      phoneStorage: unit.storage || phone.storage,
+      phoneCondition: (unit.condition || phone.condition) as 'Neuf' | 'Occasion',
+      color: unit.color || '',
+      reference: unit.reference,
+      price: Number(unit.price ?? phone.price ?? 0),
+      store: phone.store,
+      soldBy: currentUser.id,
+      soldByName: currentUser.fullName,
+      soldAt: new Date().toISOString(),
+    });
+
+    const remainingColors = phone.colors.filter((_, idx) => idx !== colorIndex);
+    const nextQty = remainingColors.reduce((sum, c) => sum + (c.qty || 0), 0);
+    updatePhone(phone.id, { colors: remainingColors, quantity: nextQty });
+
+    setDetailPhone(prev => {
+      if (!prev || prev.id !== phone.id) return prev;
+      return { ...prev, colors: remainingColors, quantity: nextQty };
+    });
+
+    setArchivingUnitKey(null);
   };
 
   // Open request modal — prefill with phone data
@@ -802,7 +860,11 @@ export const EmployeeInventoryPage = () => {
               {/* Unit list */}
               <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
                 {detailPhone.colors && detailPhone.colors.length > 0 ? (
-                  detailPhone.colors.map((c, i) => (
+                  detailPhone.colors.map((c, i) => {
+                    const unitKey = `${detailPhone.id}-${i}`;
+                    const archived = isSoldUnitAlreadyArchived(detailPhone, c);
+                    const isArchiving = archivingUnitKey === unitKey;
+                    return (
                     <div key={i} className={cn('p-3 rounded-xl border space-y-2', c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50')}>
                       {/* Row 1: color + title + status + price */}
                       <div className="flex items-center gap-3">
@@ -851,6 +913,23 @@ export const EmployeeInventoryPage = () => {
                           <ReactBarcode value={c.reference} format="CODE128" width={1.5} height={35} fontSize={10} margin={2} />
                         </div>
                       )}
+                      {c.qty === 0 && (
+                        <div className="flex items-center justify-end">
+                          <button
+                            onClick={() => archiveSoldUnitToSales(detailPhone, i)}
+                            disabled={archived || isArchiving}
+                            className={cn(
+                              'inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg border transition-colors',
+                              archived
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 cursor-not-allowed'
+                                : 'bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700'
+                            )}
+                          >
+                            {isArchiving && <Loader2 size={12} className="animate-spin" />}
+                            {archived ? 'Deja archive' : 'Ajouter a l\'archive'}
+                          </button>
+                        </div>
+                      )}
                       {/* Row 4: Occasion-specific badges */}
                       {(c.batteryHealth || c.screenCondition || c.frameCondition) && (
                         <div className="flex flex-wrap gap-1.5">
@@ -872,7 +951,8 @@ export const EmployeeInventoryPage = () => {
                         </p>
                       )}
                     </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <p className="text-sm text-slate-500 text-center py-4">Aucun détail disponible.</p>
                 )}

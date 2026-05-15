@@ -440,8 +440,18 @@ export const useStore = () => {
     notify();
     insertSaleToDB(sale).then(realId => {
       if (realId) {
-        globalSales = globalSales.map(s => s.id === tempId ? { ...s, id: realId } : s);
-        notify();
+        // After successful DB insert, reload ALL sales to ensure we have complete data
+        fetchSalesFromDB().then(allSales => {
+          globalSales = allSales;
+          notify();
+        });
+      } else {
+        // If insert failed, remove the temp sale and reload from DB
+        globalSales = globalSales.filter(s => s.id !== tempId);
+        fetchSalesFromDB().then(allSales => {
+          globalSales = allSales;
+          notify();
+        });
       }
     });
   };
@@ -500,6 +510,44 @@ export const useStore = () => {
     deleteSparePart,
     addSale,
     clearSales,
-    setUserOnline
+    setUserOnline,
+    getEffectiveInventory: () => {
+      // Calculate effective inventory by subtracting sales from quantity
+      return globalInventory.map(phone => {
+        // Count how many of this phone model have been sold
+        const soldCount = globalSales.filter(sale => 
+          sale.phoneBrand === phone.brand && 
+          sale.phoneModel === phone.model &&
+          sale.store === phone.store
+        ).length;
+        
+        // Calculate effective quantity by subtracting sold count
+        let effectiveQty = Math.max(0, phone.quantity - soldCount);
+        
+        // If phone has colors, also update colors qty
+        let effectiveColors = phone.colors;
+        if (phone.colors && phone.colors.length > 0) {
+          effectiveColors = phone.colors.map(color => {
+            const colorSoldCount = globalSales.filter(sale =>
+              sale.phoneBrand === phone.brand &&
+              sale.phoneModel === phone.model &&
+              sale.store === phone.store &&
+              sale.color === (color.color || '')
+            ).length;
+            return {
+              ...color,
+              qty: Math.max(0, color.qty - colorSoldCount)
+            };
+          });
+          effectiveQty = effectiveColors.reduce((sum, c) => sum + c.qty, 0);
+        }
+        
+        return {
+          ...phone,
+          quantity: effectiveQty,
+          colors: effectiveColors
+        };
+      });
+    }
   };
 };

@@ -11,7 +11,10 @@ const RAM_OPTIONS = ['2 Go', '3 Go', '4 Go', '6 Go', '8 Go', '12 Go', '16 Go', '
 const STORAGE_OPTIONS = ['32 Go', '64 Go', '128 Go', '256 Go', '512 Go', '1 To'];
 
 export const AdminInventoryPage = () => {
-  const { inventory, stores, brands, addPhone, updatePhone, deletePhone, addBrand, deleteBrand, updateBrand, currentUser } = useStore();
+  const { inventory, stores, brands, addPhone, updatePhone, deletePhone, addBrand, deleteBrand, updateBrand, currentUser, getEffectiveInventory } = useStore();
+
+  // Use effective inventory (subtracts sales from quantity)
+  const effectiveInventory = getEffectiveInventory();
 
   // Strict permission check: employees must have canAccessInventory permission
   if (currentUser && currentUser.role !== 'Administrateur' && !currentUser.permissions?.canAccessInventory) {
@@ -71,7 +74,10 @@ export const AdminInventoryPage = () => {
   // Detail modal state
   const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
 
-  const filteredInventory = inventory.filter(phone => {
+  const filteredInventory = effectiveInventory.filter(phone => {
+    const hasStock = phone.quantity > 0;
+    if (!hasStock) return false;
+
     // Employees can only see phones in their assigned stores
     if (isEmployee && !currentUser?.stores.includes(phone.store)) return false;
     const term = searchTerm.toLowerCase();

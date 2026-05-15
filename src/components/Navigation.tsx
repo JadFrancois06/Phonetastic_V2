@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  Users, 
-  Clock, 
-  FileText, 
-  Settings, 
-  LogOut, 
-  Menu, 
+import {
+  LayoutDashboard,
+  Users,
+  Clock,
+  FileText,
+  Settings,
+  LogOut,
+  Menu,
   X,
   User as UserIcon,
   Timer,
@@ -41,6 +41,7 @@ const adminItems: SidebarItem[] = [
   { label: 'Rapports mensuels', href: '/admin/reports', icon: FileText, group: 'Gestion' },
   { label: 'Stock', href: '/admin/inventory', icon: Package, group: 'Inventaire' },
   { label: 'Statistiques', href: '/admin/stats', icon: BarChart3, group: 'Inventaire' },
+  { label: 'Archive des ventes', href: '/admin/sales-archive', icon: History, group: 'Inventaire' },
   { label: 'Pièces détachées', href: '/admin/spare-parts', icon: Wrench, group: 'Inventaire' },
   { label: 'Messages', href: '/admin/chat', icon: MessageSquare, group: 'Communication' },
   { label: 'Factures M2', href: '/admin/invoice-editor_m1', icon: FileText, group: 'Facturation' },
@@ -120,7 +121,7 @@ export const Sidebar = ({ role }: { role: 'admin' | 'employee' }) => {
     <>
       {/* Mobile Toggle */}
       {!isOpen && (
-        <button 
+        <button
           onClick={() => setIsOpen(true)}
           className="fixed top-3.5 left-4 z-50 rounded-xl bg-slate-900 p-2.5 shadow-lg lg:hidden"
         >
@@ -146,7 +147,7 @@ export const Sidebar = ({ role }: { role: 'admin' | 'employee' }) => {
                 <p className="text-[10px] text-slate-500 font-medium tracking-wide">DASHBOARD</p>
               </div>
             </div>
-            <button 
+            <button
               onClick={() => setIsOpen(false)}
               className="lg:hidden p-2 -mr-1 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-all"
             >
@@ -195,7 +196,7 @@ export const Sidebar = ({ role }: { role: 'admin' | 'employee' }) => {
           <div className="mx-3 border-t border-slate-700/60" />
           <div className="p-3">
             {currentUser && (
-              <NavLink 
+              <NavLink
                 to="/profile"
                 onClick={() => setIsOpen(false)}
                 className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-slate-400 hover:bg-slate-800 hover:text-white transition-all duration-200 mb-1"
@@ -210,9 +211,9 @@ export const Sidebar = ({ role }: { role: 'admin' | 'employee' }) => {
                 <ChevronRight size={14} className="text-slate-600 shrink-0" />
               </NavLink>
             )}
-            <button 
+            <button
               onClick={handleLogout}
-              className="flex items-center gap-3 w-full px-3 py-2.5 text-sm font-medium text-rose-400 rounded-xl hover:bg-rose-500/10 hover:text-rose-300 transition-all duration-200"
+              className="flex items-center gap-3 w-full px-3 py-2.5 text-sm font-medium text-red-600 rounded-xl hover:bg-rose-500/10 hover:text-rose-300 transition-all duration-200"
             >
               <LogOut className="h-[18px] w-[18px]" />
               Déconnexion
@@ -223,7 +224,7 @@ export const Sidebar = ({ role }: { role: 'admin' | 'employee' }) => {
 
       {/* Overlay */}
       {isOpen && (
-        <div 
+        <div
           onClick={() => setIsOpen(false)}
           className={cn("fixed inset-0 z-30 lg:hidden backdrop-blur-sm", backgrounds.overlay)}
         />
@@ -235,6 +236,8 @@ export const Sidebar = ({ role }: { role: 'admin' | 'employee' }) => {
 export const Header = ({ title, user }: { title: string; user: any }) => {
   const [headerUnread, setHeaderUnread] = useState(0);
   const headerChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const { logout } = useStore();
+  const navigate = useNavigate();
 
   // Load initial unread count
   useEffect(() => {
@@ -264,6 +267,11 @@ export const Header = ({ title, user }: { title: string; user: any }) => {
   }, [user?.id]);
 
   const chatHref = user?.role === 'Admin' ? '/admin/chat' : '/employee/chat';
+
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
 
   return (
     <header className={cn(
@@ -303,6 +311,15 @@ export const Header = ({ title, user }: { title: string; user: any }) => {
             {user.fullName?.charAt(0)?.toUpperCase() || <UserIcon size={18} />}
           </div>
         </NavLink>
+
+        {/* Logout button */}
+        <button
+          onClick={handleLogout}
+          title="Déconnexion"
+          className="p-2.5 rounded-xl text-slate-500 hover:text-red-600 hover:bg-red-50 transition-all duration-200"
+        >
+          <LogOut size={20} />
+        </button>
       </div>
     </header>
   );

@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { TabletLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { cn } from '../lib/utils';
-import { MessageSquare, Package, ArrowLeftRight, ArrowRight, BarChart3 } from 'lucide-react';
+import { MessageSquare, Package, ArrowLeftRight, ArrowRight, BarChart3, Archive } from 'lucide-react';
 
 export const TabletHubPage = () => {
   const navigate = useNavigate();
@@ -98,6 +98,27 @@ export const TabletHubPage = () => {
             <h2 className="mt-4 text-xl font-black text-slate-900">Messagerie</h2>
             <p className="mt-1 text-sm text-slate-500">Conversation prioritaire avec le magasin opposé ({targetStore || 'non défini'}).</p>
             <div className="mt-4 flex items-center gap-2 text-cyan-700 font-bold text-sm">
+              Ouvrir
+              <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </button>
+
+          <button
+            onClick={() => {
+              setCurrentStore(activeStore);
+              navigate(`/tablet/sales/${encodeURIComponent(activeStore)}`);
+            }}
+            className={cn(
+              'group rounded-2xl p-6 text-left border-2 border-slate-200 bg-gradient-to-br from-white to-emerald-50',
+              'hover:border-emerald-400 hover:shadow-xl transition-all'
+            )}
+          >
+            <div className="h-12 w-12 rounded-2xl bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center">
+              <Archive size={24} />
+            </div>
+            <h2 className="mt-4 text-xl font-black text-slate-900">Archive vente</h2>
+            <p className="mt-1 text-sm text-slate-500">Consulter l'historique des téléphones vendus et rechercher par IMEI ou modèle.</p>
+            <div className="mt-4 flex items-center gap-2 text-emerald-700 font-bold text-sm">
               Ouvrir
               <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
             </div>
