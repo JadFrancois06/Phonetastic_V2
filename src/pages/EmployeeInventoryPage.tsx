@@ -118,17 +118,14 @@ export const EmployeeInventoryPage = () => {
   };
 
   const isSoldUnitAlreadyArchived = (phone: Phone, color: PhoneColor) => {
+    // Only use reference (IMEI) if it exists - it's the unique identifier
     if (color.reference) {
-      return sales.some(s => s.reference === color.reference && s.store === phone.store);
+      return sales.some(s => s.reference === color.reference);
     }
-
-    return sales.some(s => (
-      s.store === phone.store &&
-      s.phoneBrand === phone.brand &&
-      s.phoneModel === phone.model &&
-      s.color === (color.color || '') &&
-      Number(s.price) === Number(color.price ?? phone.price)
-    ));
+    
+    // If no reference, we can't reliably check - allow archiving
+    // (prevents false positives when multiple units have same specs)
+    return false;
   };
 
   const archiveSoldUnitToSales = (phone: Phone, colorIndex: number) => {
