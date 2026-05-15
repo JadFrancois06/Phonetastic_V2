@@ -859,7 +859,7 @@ export const EmployeeInventoryPage = () => {
                 {detailPhone.colors && detailPhone.colors.length > 0 ? (
                   detailPhone.colors.map((c, i) => {
                     const unitKey = `${detailPhone.id}-${i}`;
-                    const archived = isSoldUnitAlreadyArchived(detailPhone, c);
+                    const archived = false; // All qty=0 units can be archived
                     const isArchiving = archivingUnitKey === unitKey;
                     return (
                     <div key={i} className={cn('p-3 rounded-xl border space-y-2', c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50')}>

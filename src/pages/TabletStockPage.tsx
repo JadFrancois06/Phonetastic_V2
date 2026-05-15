@@ -364,24 +364,11 @@ export const TabletStockPage = () => {
     setSellEmployeeId('');
   };
 
-  const isSoldUnitAlreadyArchived = (phone: Phone, color: PhoneColor) => {
-    // Only use reference (IMEI) if it exists - it's the unique identifier
-    if (color.reference) {
-      return sales.some(s => s.reference === color.reference);
-    }
-    
-    // If no reference, we can't reliably check - allow archiving
-    // (prevents false positives when multiple units have same specs)
-    return false;
-  };
-
   const archiveSoldUnitToSales = (phone: Phone, colorIndex: number) => {
     if (!currentUser || !phone.colors || colorIndex < 0 || colorIndex >= phone.colors.length) return;
 
     const unit = phone.colors[colorIndex];
     if (!unit || unit.qty > 0) return;
-
-    if (isSoldUnitAlreadyArchived(phone, unit)) return;
 
     const key = `${phone.id}-${colorIndex}`;
     setArchivingUnitKey(key);
@@ -1119,7 +1106,7 @@ export const TabletStockPage = () => {
               <div className="p-4 space-y-3 max-h-[70vh] overflow-y-auto">
                 {detailPhone.colors && detailPhone.colors.length > 0 ? detailPhone.colors.map((c, i) => {
                   const unitKey = `${detailPhone.id}-${i}`;
-                  const archived = isSoldUnitAlreadyArchived(detailPhone, c);
+                  const archived = false; // All qty=0 units can be archived
                   const isArchiving = archivingUnitKey === unitKey;
                   return (
                   <div key={i} className={cn(
