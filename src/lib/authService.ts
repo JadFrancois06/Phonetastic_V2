@@ -658,3 +658,9 @@ export async function clearAllSalesFromDB(): Promise<boolean> {
   if (error) { console.error('[clearAllSalesFromDB]', error.message); return false; }
   return true;
 }
+
+export async function deleteSaleFromDB(saleId: string): Promise<boolean> {
+  const { error } = await supabase.from('sales').delete().eq('id', saleId);
+  if (error) { console.error('[deleteSaleFromDB]', error.message); return false; }
+  return true;
+}

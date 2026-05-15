@@ -3,7 +3,7 @@ import { Navigate, useParams } from 'react-router-dom';
 import { AdminLayout, TabletLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { cn } from '../lib/utils';
-import { Search, Download, Calendar, MapPin, User, Smartphone } from 'lucide-react';
+import { Search, Download, Calendar, MapPin, User, Smartphone, Undo2, Loader2 } from 'lucide-react';
 import { Sale } from '../types';
 
 const formatDateFR = (dateStr: string) => {
@@ -12,10 +12,11 @@ const formatDateFR = (dateStr: string) => {
 };
 
 export const SalesArchivePage = () => {
-  const { currentUser, sales } = useStore();
+  const { currentUser, sales, restoreFromArchive } = useStore();
   const { storeName } = useParams();
   const [search, setSearch] = useState('');
   const [storeFilter, setStoreFilter] = useState('All');
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   if (!currentUser) return <Navigate to="/login" replace />;
   
@@ -92,6 +93,12 @@ export const SalesArchivePage = () => {
     link.href = URL.createObjectURL(blob);
     link.download = `archive-ventes-${new Date().toISOString().slice(0, 10)}.csv`;
     link.click();
+  };
+
+  const handleRestore = (saleId: string) => {
+    setRestoringId(saleId);
+    restoreFromArchive(saleId);
+    setTimeout(() => setRestoringId(null), 1000);
   };
 
   const Layout = isTablet ? TabletLayout : AdminLayout;
@@ -209,6 +216,7 @@ export const SalesArchivePage = () => {
                     <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Prix</th>
                     <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Magasin</th>
                     <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Vendu par</th>
+                    <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -262,6 +270,29 @@ export const SalesArchivePage = () => {
                           <User size={14} className="text-slate-400" />
                           {sale.soldByName}
                         </div>
+                      </td>
+                      <td className="px-5 py-4 text-sm">
+                        <button
+                          onClick={() => handleRestore(sale.id)}
+                          disabled={restoringId === sale.id}
+                          className={cn(
+                            'flex items-center gap-2 px-3 py-1.5 rounded-lg font-semibold text-xs transition-colors',
+                            restoringId === sale.id
+                              ? 'bg-slate-200 text-slate-600 cursor-wait'
+                              : isTablet
+                              ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                              : isEmployee
+                              ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                              : 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                          )}
+                        >
+                          {restoringId === sale.id ? (
+                            <Loader2 size={14} className="animate-spin" />
+                          ) : (
+                            <Undo2 size={14} />
+                          )}
+                          {restoringId === sale.id ? 'Restauration...' : 'Restaurer'}
+                        </button>
                       </td>
                     </tr>
                   ))}

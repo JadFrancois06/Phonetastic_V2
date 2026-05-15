@@ -32,6 +32,7 @@ import {
   deleteSparePartFromDB,
   fetchSalesFromDB,
   insertSaleToDB,
+  deleteSaleFromDB,
   clearAllSalesFromDB,
   updateBrandInDB,
   renameBrandOnPhonesInDB,
@@ -466,6 +467,77 @@ export const useStore = () => {
     return ok;
   };
 
+  const restoreFromArchive = (saleId: string) => {
+    // Find the sale to restore
+    const sale = globalSales.find(s => s.id === saleId);
+    if (!sale) return;
+
+    // Find the phone to restore the unit to
+    const phone = globalInventory.find(p =>
+      p.brand === sale.phoneBrand &&
+      p.model === sale.phoneModel &&
+      p.store === sale.store
+    );
+
+    if (!phone) {
+      // Phone doesn't exist - create it
+      const newPhone: Omit<Phone, 'id'> = {
+        brand: sale.phoneBrand,
+        model: sale.phoneModel,
+        price: sale.price,
+        quantity: 1,
+        condition: sale.phoneCondition as 'Neuf' | 'Occasion',
+        ram: sale.phoneRam,
+        storage: sale.phoneStorage,
+        store: sale.store,
+        colors: [{
+          color: sale.color || '',
+          qty: 1,
+          ram: sale.phoneRam,
+          storage: sale.phoneStorage,
+          condition: sale.phoneCondition as 'Neuf' | 'Occasion',
+          price: sale.price,
+          reference: sale.reference
+        }]
+      };
+      addPhone(newPhone);
+    } else {
+      // Add unit back to existing phone
+      const updatedColors = [...(phone.colors || [])];
+      const existingColorIdx = updatedColors.findIndex(c => 
+        c.color === (sale.color || '') && 
+        c.reference === sale.reference
+      );
+
+      if (existingColorIdx >= 0) {
+        // Color already exists, increment qty
+        updatedColors[existingColorIdx] = {
+          ...updatedColors[existingColorIdx],
+          qty: (updatedColors[existingColorIdx].qty || 0) + 1
+        };
+      } else {
+        // New color, add it
+        updatedColors.push({
+          color: sale.color || '',
+          qty: 1,
+          ram: sale.phoneRam,
+          storage: sale.phoneStorage,
+          condition: sale.phoneCondition as 'Neuf' | 'Occasion',
+          price: sale.price,
+          reference: sale.reference
+        });
+      }
+
+      const nextQty = updatedColors.reduce((sum, c) => sum + (c.qty || 0), 0);
+      updatePhone(phone.id, { colors: updatedColors, quantity: nextQty });
+    }
+
+    // Remove sale from DB and local state
+    globalSales = globalSales.filter(s => s.id !== saleId);
+    notify();
+    deleteSaleFromDB(saleId);
+  };
+
   const setUserOnline = (userId: string, online: boolean) => {
     globalUsers = globalUsers.map(u => u.id === userId ? { ...u, online } : u);
     notify();
@@ -510,44 +582,13 @@ export const useStore = () => {
     deleteSparePart,
     addSale,
     clearSales,
+    restoreFromArchive,
     setUserOnline,
     getEffectiveInventory: () => {
-      // Calculate effective inventory by subtracting sales from quantity
-      return globalInventory.map(phone => {
-        // Count how many of this phone model have been sold
-        const soldCount = globalSales.filter(sale => 
-          sale.phoneBrand === phone.brand && 
-          sale.phoneModel === phone.model &&
-          sale.store === phone.store
-        ).length;
-        
-        // Calculate effective quantity by subtracting sold count
-        let effectiveQty = Math.max(0, phone.quantity - soldCount);
-        
-        // If phone has colors, also update colors qty
-        let effectiveColors = phone.colors;
-        if (phone.colors && phone.colors.length > 0) {
-          effectiveColors = phone.colors.map(color => {
-            const colorSoldCount = globalSales.filter(sale =>
-              sale.phoneBrand === phone.brand &&
-              sale.phoneModel === phone.model &&
-              sale.store === phone.store &&
-              sale.color === (color.color || '')
-            ).length;
-            return {
-              ...color,
-              qty: Math.max(0, color.qty - colorSoldCount)
-            };
-          });
-          effectiveQty = effectiveColors.reduce((sum, c) => sum + c.qty, 0);
-        }
-        
-        return {
-          ...phone,
-          quantity: effectiveQty,
-          colors: effectiveColors
-        };
-      });
+      // Return inventory as-is from DB
+      // Quantity is already managed correctly: units removed from colors[] when archived
+      // Don't subtract sales again - that would show new inventory as sold immediately
+      return globalInventory;
     }
   };
 };
