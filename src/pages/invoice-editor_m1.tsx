@@ -15,6 +15,8 @@ interface InvoiceItem {
 export default function InvoiceEditorM2() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const invoiceRef = useRef<HTMLDivElement>(null);
+  const getCurrentDate = () => new Date().toLocaleDateString('fr-FR');
+  const getCurrentTime = () => new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const [data, setData] = useState({
     sociétéName: "SASU PHONE TASTIC",
     magasinName:"RÉPUBLIQUE",
@@ -118,7 +120,10 @@ export default function InvoiceEditorM2() {
       {/* Floating Action Buttons */}
       <div className="fixed bottom-8 right-8 z-40 flex flex-col gap-4">
         <button
-          onClick={() => setIsModalOpen(true)}
+          onClick={() => {
+            setData(prev => ({ ...prev, invoiceDate: getCurrentDate(), invoiceTime: getCurrentTime() }));
+            setIsModalOpen(true);
+          }}
           className="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-lg transition-colors flex justify-center items-center"
           title="Modifier la facture"
         >
