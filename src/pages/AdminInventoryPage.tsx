@@ -3,7 +3,7 @@ import { Navigate } from 'react-router-dom';
 import { AdminLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { Plus, Search, Edit2, Trash2, Package, Settings2, X, Copy, Eye, Smartphone, AlertTriangle, RotateCcw, ShoppingCart } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, normalizeSearchText } from '../lib/utils';
 import { Phone, PhoneCondition, PhoneColor, Store, PHONE_COLORS } from '../types';
 import ReactBarcode from 'react-barcode';
 
@@ -74,16 +74,26 @@ export const AdminInventoryPage = () => {
   // Detail modal state
   const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
 
+  const getAvailableQty = (phone: Phone) => {
+    if (phone.colors && phone.colors.length > 0) {
+      return phone.colors.reduce((sum, color) => sum + (color.qty || 0), 0);
+    }
+    return phone.quantity;
+  };
+
   const filteredInventory = effectiveInventory.filter(phone => {
-    const hasStock = phone.quantity > 0;
+    const hasStock = getAvailableQty(phone) > 0;
     if (!hasStock) return false;
 
     // Employees can only see phones in their assigned stores
     if (isEmployee && !currentUser?.stores.includes(phone.store)) return false;
-    const term = searchTerm.toLowerCase();
-    const matchesSearch = phone.brand.toLowerCase().includes(term) || 
-                          phone.model.toLowerCase().includes(term) ||
-                          (phone.colors?.some(c => c.reference?.toLowerCase().includes(term)) ?? false);
+    const term = normalizeSearchText(searchTerm);
+    const combinedLabel = normalizeSearchText(`${phone.brand} ${phone.model}`);
+    const matchesSearch = !term ||
+                          normalizeSearchText(phone.brand).includes(term) || 
+                          normalizeSearchText(phone.model).includes(term) ||
+                          combinedLabel.includes(term) ||
+                          (phone.colors?.some(c => normalizeSearchText(c.reference || '').includes(term)) ?? false);
     const matchesCondition = conditionFilter === 'All' || phone.condition === conditionFilter;
     const matchesStore = storeFilter === 'All' || phone.store === storeFilter;
     const matchesBrandTab = activeBrandTab === 'All' || phone.brand === activeBrandTab;
@@ -290,10 +300,10 @@ export const AdminInventoryPage = () => {
       .reduce((sum, p) => sum + (p.quantity > 0 ? p.quantity : 0), 0);
   };
 
-  const totalStock = filteredInventory.reduce((s, p) => s + p.quantity, 0);
-  const neufCount = filteredInventory.filter(p => p.condition === 'Neuf').reduce((s, p) => s + p.quantity, 0);
-  const occasionCount = filteredInventory.filter(p => p.condition === 'Occasion').reduce((s, p) => s + p.quantity, 0);
-  const lowStockCount = filteredInventory.filter(p => p.quantity > 0 && p.quantity <= 2).length;
+  const totalStock = filteredInventory.reduce((s, p) => s + getAvailableQty(p), 0);
+  const neufCount = filteredInventory.filter(p => p.condition === 'Neuf').reduce((s, p) => s + getAvailableQty(p), 0);
+  const occasionCount = filteredInventory.filter(p => p.condition === 'Occasion').reduce((s, p) => s + getAvailableQty(p), 0);
+  const lowStockCount = filteredInventory.filter(p => getAvailableQty(p) > 0 && getAvailableQty(p) <= 2).length;
 
   return (
     <AdminLayout title="Gestion du Stock">
@@ -513,11 +523,11 @@ export const AdminInventoryPage = () => {
                     <td className="px-5 py-3.5 text-center whitespace-nowrap">
                       <span className={cn(
                         'inline-flex items-center justify-center min-w-7 h-7 px-2 rounded-lg text-xs font-bold tabular-nums',
-                        phone.quantity > 5 ? 'bg-slate-100 text-slate-600' : 
-                        phone.quantity > 0 ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/80' : 
+                        getAvailableQty(phone) > 5 ? 'bg-slate-100 text-slate-600' : 
+                        getAvailableQty(phone) > 0 ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/80' : 
                         'bg-red-50 text-red-600 ring-1 ring-red-200/80'
                       )}>
-                        {phone.quantity}
+                        {getAvailableQty(phone)}
                       </span>
                     </td>
                     <td className="px-5 py-3.5 whitespace-nowrap">
@@ -1204,7 +1214,7 @@ export const AdminInventoryPage = () => {
 
               {/* Footer */}
               <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between">
-                <span className="text-xs text-slate-400 font-medium">{detailPhone.quantity} unité(s) au total</span>
+                <span className="text-xs text-slate-400 font-medium">{detailPhone.colors && detailPhone.colors.length > 0 ? detailPhone.colors.reduce((sum, color) => sum + (color.qty || 0), 0) : detailPhone.quantity} unité(s) au total</span>
                 <button
                   onClick={() => setDetailPhone(null)}
                   className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200/80 rounded-xl hover:bg-slate-50 transition-all"

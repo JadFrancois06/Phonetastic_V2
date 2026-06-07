@@ -3,7 +3,7 @@ import { Navigate, Link } from 'react-router-dom';
 import { EmployeeLayout } from '../components/Layouts';
 import { useStore } from '../store';
 import { Search, Package, ShoppingCart, Send, CheckCircle2, Settings2, Eye, X, Loader2 } from 'lucide-react';
-import { cn } from '../lib/utils';
+import { cn, normalizeSearchText } from '../lib/utils';
 import { PhoneCondition, Phone, PhoneColor, Store } from '../types';
 import { sendMessageToDB, fetchOnlineUsersFromDB, fetchPhoneReservationLocksFromDB, PhoneReservationLock } from '../lib/authService';
 import { supabase } from '../lib/supabase';
@@ -66,11 +66,14 @@ export const EmployeeInventoryPage = () => {
     const hasStock = phone.quantity > 0;
     if (!hasStock) return false;
 
-    const term = searchTerm.toLowerCase();
-    const matchesSearch = phone.brand.toLowerCase().includes(term) || 
-                          phone.model.toLowerCase().includes(term) ||
+    const term = normalizeSearchText(searchTerm);
+    const combinedLabel = normalizeSearchText(`${phone.brand} ${phone.model}`);
+    const matchesSearch = !term ||
+                          normalizeSearchText(phone.brand).includes(term) || 
+                          normalizeSearchText(phone.model).includes(term) ||
+                          combinedLabel.includes(term) ||
                           String(phone.price).includes(searchTerm) ||
-                          (phone.colors?.some(c => c.reference?.toLowerCase().includes(term)) ?? false);
+                          (phone.colors?.some(c => normalizeSearchText(c.reference || '').includes(term)) ?? false);
     const matchesCondition = conditionFilter === 'All' || phone.condition === conditionFilter;
     const matchesStore = storeFilter === 'All' || phone.store === storeFilter;
     const matchesBrandTab = activeBrandTab === 'All' || phone.brand === activeBrandTab;

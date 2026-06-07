@@ -585,10 +585,28 @@ export const useStore = () => {
     restoreFromArchive,
     setUserOnline,
     getEffectiveInventory: () => {
-      // Return inventory as-is from DB
-      // Quantity is already managed correctly: units removed from colors[] when archived
-      // Don't subtract sales again - that would show new inventory as sold immediately
-      return globalInventory;
+      // Keep quantity aligned with per-color quantities when colors exist.
+      // Colors are the source of truth for tablet/admin inventory cards.
+      return globalInventory
+      .filter(phone => {
+        if (!phone.colors || phone.colors.length === 0) return true;
+
+        const availableUnits = phone.colors.filter(color => (color.qty || 0) > 0);
+        const malformedLegacyRow = availableUnits.some(color => (color.qty || 0) > 1 && !!color.reference);
+
+        return !malformedLegacyRow;
+      })
+      .map(phone => {
+        if (phone.colors && phone.colors.length > 0) {
+          const derivedQty = phone.colors.reduce((sum, color) => sum + (color.qty || 0), 0);
+          return {
+            ...phone,
+            quantity: derivedQty,
+          };
+        }
+
+        return phone;
+      });
     }
   };
 };

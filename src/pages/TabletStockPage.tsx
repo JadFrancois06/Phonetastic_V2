@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { TabletLayout } from '../components/Layouts';
 import { useStore } from '../store';
-import { cn } from '../lib/utils';
+import { cn, normalizeSearchText } from '../lib/utils';
 import { Phone, PhoneColor } from '../types';
 import { Package, Search, Send, X, ChevronLeft, Store, ShoppingCart, CheckCircle2, Eye, Loader2 } from 'lucide-react';
 import ReactBarcode from 'react-barcode';
@@ -26,14 +26,17 @@ const getAvailableQty = (phone: Phone) => {
 };
 
 const getPriceDisplay = (phone: Phone) => {
-  if (phone.condition === 'Occasion' && phone.colors && phone.colors.some(c => c.price)) {
-    const prices = phone.colors.filter(c => c.price && c.qty > 0).map(c => c.price!);
-    if (prices.length === 0) return `${phone.price}€`;
-    const min = Math.min(...prices);
-    const max = Math.max(...prices);
+  const colorPrices = phone.colors
+    ? phone.colors.filter(c => c.price !== undefined && c.price !== null && Number(c.price) > 0).map(c => Number(c.price))
+    : [];
+
+  if (colorPrices.length > 0) {
+    const min = Math.min(...colorPrices);
+    const max = Math.max(...colorPrices);
     return min === max ? `${min}€` : `${min} – ${max}€`;
   }
-  return `${phone.price}€`;
+
+  return `${Number(phone.price) || 0}€`;
 };
 
 const getFilterPrices = (phone: Phone): number[] => {
@@ -487,13 +490,15 @@ export const TabletStockPage = () => {
 
   const filteredPhones = sourcePhones.filter(phone => {
     if (conditionFilter !== 'All' && phone.condition !== conditionFilter) return false;
-    const term = search.trim().toLowerCase();
+    const term = normalizeSearchText(search);
+    const combinedLabel = normalizeSearchText(`${phone.brand} ${phone.model}`);
     const matchesSearch = !term || (
-      phone.brand.toLowerCase().includes(term) ||
-      phone.model.toLowerCase().includes(term) ||
-      phone.storage.toLowerCase().includes(term) ||
-      phone.ram.toLowerCase().includes(term) ||
-      (phone.colors?.some(c => c.reference?.toLowerCase().includes(term)) ?? false)
+      normalizeSearchText(phone.brand).includes(term) ||
+      normalizeSearchText(phone.model).includes(term) ||
+      combinedLabel.includes(term) ||
+      normalizeSearchText(phone.storage).includes(term) ||
+      normalizeSearchText(phone.ram).includes(term) ||
+      (phone.colors?.some(c => normalizeSearchText(c.reference || '').includes(term)) ?? false)
     );
     if (!matchesSearch) return false;
 
@@ -1177,7 +1182,7 @@ export const TabletStockPage = () => {
                 )}
               </div>
               <div className="px-5 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between">
-                <span className="text-xs text-slate-500">{detailPhone.quantity} unité(s) au total</span>
+                <span className="text-xs text-slate-500">{getAvailableQty(detailPhone)} unité(s) au total</span>
                 <button onClick={() => setDetailPhone(null)} className="px-4 py-2 text-sm font-bold text-slate-700 bg-white border-2 border-slate-300 rounded-xl hover:bg-slate-50">
                   Fermer
                 </button>
