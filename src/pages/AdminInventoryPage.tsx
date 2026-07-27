@@ -1,0 +1,1291 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Navigate } from 'react-router-dom';
+import { AdminLayout } from '../components/Layouts';
+import { useStore } from '../store';
+import { Plus, Search, Edit2, Trash2, Package, Settings2, X, Copy, Eye, Smartphone, AlertTriangle, RotateCcw, ShoppingCart } from 'lucide-react';
+import { cn, normalizeSearchText } from '../lib/utils';
+import { Phone, PhoneCondition, PhoneColor, Store, PHONE_COLORS } from '../types';
+import ReactBarcode from 'react-barcode';
+
+const RAM_OPTIONS = ['2 Go', '3 Go', '4 Go', '6 Go', '8 Go', '12 Go', '16 Go', '24 Go'];
+const STORAGE_OPTIONS = ['32 Go', '64 Go', '128 Go', '256 Go', '512 Go', '1 To'];
+
+export const AdminInventoryPage = () => {
+  const { inventory, stores, brands, addPhone, updatePhone, deletePhone, addBrand, deleteBrand, updateBrand, currentUser, getEffectiveInventory } = useStore();
+
+  // Use effective inventory (subtracts sales from quantity)
+  const effectiveInventory = getEffectiveInventory();
+
+  // Strict permission check: employees must have canAccessInventory permission
+  if (currentUser && currentUser.role !== 'Administrateur' && !currentUser.permissions?.canAccessInventory) {
+    return <Navigate to="/employee/dashboard" replace />;
+  }
+
+  const isEmployee = currentUser?.role !== 'Administrateur';
+  const allowedStores = isEmployee
+    ? stores.filter(s => currentUser?.stores.includes(s.name))
+    : stores;
+
+  const getDefaultStore = () => {
+    if (isEmployee) {
+      const preferred = currentUser?.currentStore;
+      if (preferred && allowedStores.some(s => s.name === preferred)) return preferred;
+      return allowedStores[0]?.name || '';
+    }
+    return stores[0]?.name || '';
+  };
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [conditionFilter, setConditionFilter] = useState<PhoneCondition | 'All'>('All');
+  const [storeFilter, setStoreFilter] = useState<Store | 'All'>('All');
+  const [activeBrandTab, setActiveBrandTab] = useState<string>('All');
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isBrandModalOpen, setIsBrandModalOpen] = useState(false);
+  const [newBrandName, setNewBrandName] = useState('');
+  const [editingBrandId, setEditingBrandId] = useState<string | null>(null);
+  const [editingBrandName, setEditingBrandName] = useState('');
+  
+  const [editingPhone, setEditingPhone] = useState<Phone | null>(null);
+  const [formColors, setFormColors] = useState<PhoneColor[]>([]);
+  const [customColor, setCustomColor] = useState('#000000');
+
+  // Quick-add (duplicate) modal
+  const [dupPhone, setDupPhone] = useState<Phone | null>(null);
+  const [dupColors, setDupColors] = useState<PhoneColor[]>([]);
+  const [dupQty, setDupQty] = useState(1);
+  const [dupStore, setDupStore] = useState('');
+  const [dupCustomColor, setDupCustomColor] = useState('#000000');
+
+  // Custom confirm dialog state
+  const [confirmDialog, setConfirmDialog] = useState<{ message: string; onConfirm: () => void } | null>(null);
+  const [errorNotice, setErrorNotice] = useState<string | null>(null);
+  const errorNoticeTimerRef = useRef<number | null>(null);
+
+  const [formData, setFormData] = useState<Partial<Phone>>({
+    brand: brands[0]?.name || '',
+    model: '',
+    ram: '',
+    storage: '',
+    price: 0,
+    quantity: 0,
+    condition: 'Neuf',
+    store: getDefaultStore()
+  });
+
+  // Detail modal state
+  const [detailPhone, setDetailPhone] = useState<Phone | null>(null);
+
+  const showErrorNotice = (message: string) => {
+    setErrorNotice(message);
+    if (errorNoticeTimerRef.current) {
+      window.clearTimeout(errorNoticeTimerRef.current);
+    }
+    errorNoticeTimerRef.current = window.setTimeout(() => {
+      setErrorNotice(null);
+    }, 4200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (errorNoticeTimerRef.current) {
+        window.clearTimeout(errorNoticeTimerRef.current);
+      }
+    };
+  }, []);
+
+  const getAvailableQty = (phone: Phone) => {
+    if (phone.colors && phone.colors.length > 0) {
+      return phone.colors.reduce((sum, color) => sum + (color.qty || 0), 0);
+    }
+    return phone.quantity;
+  };
+
+  const normalizeImei = (value: string) => value.trim().toLowerCase();
+
+  const getExistingImeiSet = (excludePhoneId?: string) => {
+    const set = new Set<string>();
+    inventory.forEach((p) => {
+      if (excludePhoneId && p.id === excludePhoneId) return;
+      (p.colors || []).forEach((c) => {
+        const ref = normalizeImei(c.reference || '');
+        if (ref) set.add(ref);
+      });
+    });
+    return set;
+  };
+
+  const filteredInventory = effectiveInventory.filter(phone => {
+    const hasStock = getAvailableQty(phone) > 0;
+    if (!hasStock) return false;
+
+    // Employees can only see phones in their assigned stores
+    if (isEmployee && !currentUser?.stores.includes(phone.store)) return false;
+    const term = normalizeSearchText(searchTerm);
+    const combinedLabel = normalizeSearchText(`${phone.brand} ${phone.model}`);
+    const matchesSearch = !term ||
+                          normalizeSearchText(phone.brand).includes(term) || 
+                          normalizeSearchText(phone.model).includes(term) ||
+                          combinedLabel.includes(term) ||
+                          (phone.colors?.some(c => normalizeSearchText(c.reference || '').includes(term)) ?? false);
+    const matchesCondition = conditionFilter === 'All' || phone.condition === conditionFilter;
+    const matchesStore = storeFilter === 'All' || phone.store === storeFilter;
+    const matchesBrandTab = activeBrandTab === 'All' || phone.brand === activeBrandTab;
+    return matchesSearch && matchesCondition && matchesStore && matchesBrandTab;
+  });
+
+  const handleOpenModal = (phone?: Phone) => {
+    if (phone) {
+      setEditingPhone(phone);
+      setFormData({ ...phone, quantity: (phone.colors && phone.colors.length > 0) ? phone.colors.length : phone.quantity });
+      setFormColors((phone.colors || []).map(c => ({
+        ...c,
+        qty: c.qty ?? 1,  // preserve sold state (0) or available (1)
+        reference: c.reference || '',
+        ram: c.ram || phone.ram || '8 Go',
+        storage: c.storage || phone.storage || '128 Go',
+        price: typeof c.price === 'number' ? c.price : (phone.price || 0),
+      })));
+    } else {
+      setEditingPhone(null);
+      setFormData({
+        brand: brands[0]?.name || '',
+        model: '',
+        ram: '8 Go',
+        storage: '128 Go',
+        price: 0,
+        quantity: 0,
+        condition: 'Neuf',
+        store: getDefaultStore()
+      });
+      setFormColors([]);
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    // Preserve qty (0=sold, 1=available) — do NOT reset to 1
+    const normalizedColors = formColors.map(c => ({ ...c, qty: c.qty ?? 1 }));
+    const firstSpec = normalizedColors[0];
+
+    if (normalizedColors.length > 0 && normalizedColors.length !== (formData.quantity || 0)) {
+      showErrorNotice('Le nombre de lignes (unités) doit être égal à la quantité totale.');
+      return;
+    }
+
+    const hasMissingSpec = normalizedColors.some(c => !c.ram || !c.storage || typeof c.price !== 'number' || Number.isNaN(c.price));
+    if (hasMissingSpec) {
+      showErrorNotice('RAM, stockage et prix sont obligatoires pour chaque unité.');
+      return;
+    }
+
+    const refs = normalizedColors.map(c => (c.reference || '').trim()).filter(Boolean);
+    const normalizedRefs = refs.map(normalizeImei);
+    if (new Set(normalizedRefs).size !== normalizedRefs.length) {
+      showErrorNotice('IMEI en double : chaque téléphone doit avoir un IMEI unique.');
+      return;
+    }
+
+    const existingImeiSet = getExistingImeiSet(editingPhone?.id);
+    const alreadyExists = normalizedRefs.find(r => existingImeiSet.has(r));
+    if (alreadyExists) {
+      showErrorNotice(`IMEI déjà existant dans le stock : ${alreadyExists}`);
+      return;
+    }
+
+    // Derive phone-level condition: if any unit is Occasion → mixed, else use first unit
+    const hasOccasion = normalizedColors.some(c => c.condition === 'Occasion');
+    const hasNeuf = normalizedColors.some(c => c.condition === 'Neuf' || !c.condition);
+    const derivedCondition: PhoneCondition = (hasOccasion && hasNeuf) ? 'Occasion' : (hasOccasion ? 'Occasion' : 'Neuf');
+
+    const phoneData: Partial<Phone> = {
+      ...formData,
+      // quantity = number of available (unsold) units so the tablet sees the real stock
+      quantity: normalizedColors.length > 0
+        ? normalizedColors.reduce((s, c) => s + c.qty, 0)
+        : Number(formData.quantity) || 0,
+      condition: normalizedColors.length > 0 ? derivedCondition : formData.condition,
+      ram: firstSpec?.ram || '8 Go',
+      storage: firstSpec?.storage || '128 Go',
+      price: normalizedColors.length > 0 ? Math.min(...normalizedColors.map(c => Number(c.price) || 0)) : Number(formData.price) || 0,
+      colors: normalizedColors.length > 0 ? normalizedColors : undefined,
+    };
+
+    // Enforce store constraints for employees at submit time.
+    if (isEmployee) {
+      const selectedStore = phoneData.store as Store | undefined;
+      const isAllowed = !!selectedStore && currentUser?.stores.includes(selectedStore);
+      phoneData.store = (isAllowed ? selectedStore : getDefaultStore()) as Store;
+    }
+
+    if (editingPhone) {
+      updatePhone(editingPhone.id, phoneData);
+    } else {
+      addPhone(phoneData as Omit<Phone, 'id'>);
+    }
+    setIsModalOpen(false);
+  };
+
+  const colorTotal = formColors.reduce((s, c) => s + c.qty, 0);
+  const maxQty = formData.quantity || 0;
+
+  const addColorToForm = (color: string) => {
+    if (colorTotal >= maxQty) return;
+    setFormColors([
+      ...formColors,
+      {
+        color,
+        qty: 1,
+        reference: '',
+        ram: formData.ram || '8 Go',
+        storage: formData.storage || '128 Go',
+        condition: formData.condition || 'Neuf',
+        price: Number(formData.price) || 0,
+      },
+    ]);
+  };
+
+  const removeColorFromForm = (index: number) => {
+    setFormColors(formColors.filter((_, i) => i !== index));
+  };
+
+  const updateColorQty = (index: number, _qty: number) => {
+    // One row represents one physical unit.
+    setFormColors(formColors.map((c, i) => i === index ? { ...c, qty: 1 } : c));
+  };
+
+  const updateColorCondition = (index: number, field: string, value: string | number) => {
+    setFormColors(formColors.map((c, i) => i === index ? { ...c, [field]: value } : c));
+  };
+
+  // Duplicate modal helpers
+  const openDupModal = (phone: Phone) => {
+    setDupPhone(phone);
+    setDupColors([]);
+    setDupQty(1);
+    setDupStore(isEmployee ? getDefaultStore() : (stores.find(s => s.name !== phone.store)?.name || stores[0]?.name || ''));
+  };
+
+  const dupColorTotal = dupColors.reduce((s, c) => s + c.qty, 0);
+
+  const addDupColor = (color: string) => {
+    // Duplicate mode is per-unit: same color can appear multiple times, each with its own IMEI.
+    if (dupColorTotal >= dupQty) return;
+    setDupColors([...dupColors, { color, qty: 1, reference: '' }]);
+  };
+
+  const removeDupColor = (index: number) => {
+    setDupColors(dupColors.filter((_, i) => i !== index));
+  };
+
+  const updateDupColorQty = (index: number, qty: number) => {
+    // In duplicate mode, qty is fixed to 1 per row (one device, one IMEI).
+    setDupColors(dupColors.map((c, i) => i === index ? { ...c, qty: 1 } : c));
+  };
+
+  const updateDupColorReference = (index: number, reference: string) => {
+    setDupColors(dupColors.map((c, i) => i === index ? { ...c, reference } : c));
+  };
+
+  const handleDupSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!dupPhone) return;
+
+    const refs = dupColors.map(c => (c.reference || '').trim()).filter(Boolean);
+    if (refs.length !== dupColors.length) {
+      showErrorNotice('IMEI obligatoire : veuillez saisir un IMEI pour chaque unité.');
+      return;
+    }
+
+    const normalized = refs.map(normalizeImei);
+    if (new Set(normalized).size !== normalized.length) {
+      showErrorNotice('IMEI en double : chaque téléphone doit avoir un IMEI unique.');
+      return;
+    }
+
+    const existingImeiSet = getExistingImeiSet();
+    const alreadyExists = normalized.find(r => existingImeiSet.has(r));
+    if (alreadyExists) {
+      showErrorNotice(`IMEI déjà existant dans le stock : ${alreadyExists}`);
+      return;
+    }
+
+    addPhone({
+      brand: dupPhone.brand,
+      model: dupPhone.model,
+      ram: dupPhone.ram,
+      storage: dupPhone.storage,
+      price: dupPhone.price,
+      condition: dupPhone.condition,
+      quantity: dupQty,
+      store: dupStore as Store,
+      colors: dupColors.length > 0 ? dupColors : undefined,
+    });
+    setDupPhone(null);
+  };
+
+  const handleAddBrand = () => {
+    if (newBrandName.trim()) {
+      addBrand(newBrandName.trim());
+      setNewBrandName('');
+    }
+  };
+
+  const getStockByBrand = (brandName: string) => {
+    return inventory
+      .filter(p => p.brand === brandName && (!isEmployee || currentUser?.stores.includes(p.store)))
+      .reduce((sum, p) => sum + (p.quantity > 0 ? p.quantity : 0), 0);
+  };
+
+  const totalStock = filteredInventory.reduce((s, p) => s + getAvailableQty(p), 0);
+  const neufCount = filteredInventory.filter(p => p.condition === 'Neuf').reduce((s, p) => s + getAvailableQty(p), 0);
+  const occasionCount = filteredInventory.filter(p => p.condition === 'Occasion').reduce((s, p) => s + getAvailableQty(p), 0);
+  const lowStockCount = filteredInventory.filter(p => getAvailableQty(p) > 0 && getAvailableQty(p) <= 2).length;
+
+  return (
+    <AdminLayout title="Gestion du Stock">
+      <div className="space-y-6">
+        {errorNotice && (
+          <div className="fixed top-5 right-5 z-[80] w-[min(92vw,420px)] rounded-2xl border border-rose-200 bg-white/95 backdrop-blur shadow-2xl shadow-rose-500/10">
+            <div className="p-4 flex items-start gap-3">
+              <div className="h-10 w-10 shrink-0 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center">
+                <AlertTriangle size={18} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-slate-900">Validation impossible</p>
+                <p className="mt-1 text-sm text-slate-600 leading-relaxed">{errorNotice}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setErrorNotice(null)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                title="Fermer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ═══ Stats Row ═══ */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 to-blue-700 p-5 text-white shadow-lg shadow-blue-600/20">
+            <div className="relative z-10">
+              <div className="p-2 rounded-xl bg-white/20 backdrop-blur-sm w-fit"><Package size={16} /></div>
+              <p className="text-3xl font-black mt-3 tabular-nums">{totalStock}</p>
+              <p className="text-blue-100 text-xs font-medium mt-1">Total unités</p>
+            </div>
+            <div className="absolute -right-4 -bottom-4 h-20 w-20 rounded-full bg-white/10" />
+          </div>
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 to-emerald-600 p-5 text-white shadow-lg shadow-emerald-500/20">
+            <div className="relative z-10">
+              <div className="p-2 rounded-xl bg-white/20 backdrop-blur-sm w-fit"><Smartphone size={16} /></div>
+              <p className="text-3xl font-black mt-3 tabular-nums">{neufCount}</p>
+              <p className="text-emerald-100 text-xs font-medium mt-1">Neufs</p>
+            </div>
+            <div className="absolute -right-4 -bottom-4 h-20 w-20 rounded-full bg-white/10" />
+          </div>
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-400 to-amber-500 p-5 text-white shadow-lg shadow-amber-400/20">
+            <div className="relative z-10">
+              <div className="p-2 rounded-xl bg-white/20 backdrop-blur-sm w-fit"><Smartphone size={16} /></div>
+              <p className="text-3xl font-black mt-3 tabular-nums">{occasionCount}</p>
+              <p className="text-amber-100 text-xs font-medium mt-1">Occasion</p>
+            </div>
+            <div className="absolute -right-4 -bottom-4 h-20 w-20 rounded-full bg-white/10" />
+          </div>
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-rose-500 to-rose-600 p-5 text-white shadow-lg shadow-rose-500/20">
+            <div className="relative z-10">
+              <div className="p-2 rounded-xl bg-white/20 backdrop-blur-sm w-fit"><AlertTriangle size={16} /></div>
+              <p className="text-3xl font-black mt-3 tabular-nums">{lowStockCount}</p>
+              <p className="text-rose-100 text-xs font-medium mt-1">Stock faible</p>
+            </div>
+            <div className="absolute -right-4 -bottom-4 h-20 w-20 rounded-full bg-white/10" />
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 overflow-x-scroll pb-2 scrollbar-thin" style={{ scrollbarWidth: 'thin', scrollbarColor: '#cbd5e1 #f1f5f9' }}>
+          <button
+            onClick={() => setActiveBrandTab('All')}
+            className={cn(
+              'px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap transition-all',
+              activeBrandTab === 'All' ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25' : 'bg-white text-slate-500 border border-slate-200/80 hover:text-slate-700 hover:border-slate-300'
+            )}
+          >
+            Toutes
+          </button>
+          {brands.map(brand => {
+            const brandStock = getStockByBrand(brand.name);
+            return (
+              <button
+                key={brand.id}
+                onClick={() => setActiveBrandTab(brand.name)}
+                className={cn(
+                  'px-4 py-2 text-xs font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-2',
+                  activeBrandTab === brand.name ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/25' : 'bg-white text-slate-500 border border-slate-200/80 hover:text-slate-700 hover:border-slate-300'
+                )}
+              >
+                {brand.name}
+                <span className={cn(
+                  'px-2 py-0.5 rounded-full text-xs font-bold',
+                  activeBrandTab === brand.name 
+                    ? 'bg-white/30 text-white' 
+                    : 'bg-slate-100 text-slate-600'
+                )}>
+                  {brandStock}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ═══ Filters & Actions ═══ */}
+        <div className="flex flex-col sm:flex-row flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-1 flex-wrap items-center gap-3 w-full sm:w-auto">
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+              <input
+                type="text"
+                placeholder="Rechercher un téléphone..."
+                className="w-full pl-11 pr-4 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <select
+              className="bg-white border border-slate-200/80 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+              value={conditionFilter}
+              onChange={(e) => setConditionFilter(e.target.value as PhoneCondition | 'All')}
+            >
+              <option value="All">Tous les états</option>
+              <option value="Neuf">Neuf</option>
+              <option value="Occasion">Occasion</option>
+            </select>
+            <select
+              className="bg-white border border-slate-200/80 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+              value={storeFilter}
+              onChange={(e) => setStoreFilter(e.target.value as Store | 'All')}
+            >
+              <option value="All">Tous les magasins</option>
+              {allowedStores.map(s => (
+                <option key={s.id} value={s.name}>{s.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => setIsBrandModalOpen(true)}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-white border border-slate-200/80 text-slate-600 px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-50 hover:border-slate-300 transition-all whitespace-nowrap"
+            >
+              <Settings2 size={16} />
+              Marques
+            </button>
+            <button
+              onClick={() => handleOpenModal()}
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-indigo-600/25 hover:shadow-indigo-600/40 transition-all whitespace-nowrap"
+            >
+              <Plus size={16} />
+              Ajouter
+            </button>
+          </div>
+        </div>
+
+        {/* Inventory Table */}
+        <div className="rounded-2xl border border-slate-200/80 bg-white shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="bg-slate-50/80">
+                  <th className="px-5 py-3.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Modèle</th>
+                  <th className="px-5 py-3.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Couleur</th>
+                  <th className="px-5 py-3.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">État</th>
+                  <th className="px-5 py-3.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Specs</th>
+                  <th className="px-5 py-3.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center whitespace-nowrap">Prix</th>
+                  <th className="px-5 py-3.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center whitespace-nowrap">Qté</th>
+                  <th className="px-5 py-3.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Magasin</th>
+                  <th className="px-5 py-3.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-right whitespace-nowrap">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {filteredInventory.map((phone) => (
+                  <tr key={phone.id} className="group hover:bg-slate-50/60 transition-colors">
+                    <td className="px-5 py-3.5 whitespace-nowrap">
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white shadow-sm">
+                          <Package size={16} />
+                        </div>
+                        <div>
+                          <p className="text-[13px] font-bold text-slate-900">{phone.brand}</p>
+                          <p className="text-xs text-slate-400">{phone.model}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-5 py-3.5 whitespace-nowrap">
+                      {phone.colors && phone.colors.length > 0 ? (
+                        <div className="flex items-center gap-1">
+                          {phone.colors.map((c, i) => (
+                            <span
+                              key={i}
+                              className="relative inline-block w-8 h-8 rounded-lg border border-slate-300 shadow-sm cursor-pointer hover:scale-125 hover:ring-2 hover:ring-indigo-300 transition-all"
+                              style={{ backgroundColor: c.color }}
+                              title={c.qty === 0 ? 'Vendu' : `${c.qty} unité(s)${c.reference ? ' · ' + c.reference : ''}`}
+                              onClick={() => setDetailPhone(phone)}
+                            >
+                              {c.qty === 0 && (
+                                <span className="absolute inset-0 flex items-center justify-center rounded-lg bg-white/60">
+                                  <X size={15} className="text-red-600 stroke-[3]" />
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setDetailPhone(phone)}
+                            className="ml-0.5 p-1 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
+                            title="Voir détails"
+                          >
+                            <Eye size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-300 text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-5 py-3.5 whitespace-nowrap">
+                      <span className={cn(
+                        'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold ring-1',
+                        phone.condition === 'Neuf'
+                          ? 'text-emerald-700 bg-emerald-50 ring-emerald-200/80'
+                          : 'text-amber-700 bg-amber-50 ring-amber-200/80'
+                      )}>
+                        <span className={cn('h-1.5 w-1.5 rounded-full', phone.condition === 'Neuf' ? 'bg-emerald-500' : 'bg-amber-500')} />
+                        {phone.condition}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-xs text-slate-500 whitespace-nowrap font-medium">
+                      {phone.storage} · {phone.ram} RAM
+                    </td>
+                    <td className="px-5 py-3.5 text-center whitespace-nowrap">
+                      <span className="text-[13px] font-black text-slate-900 tabular-nums">
+                      {phone.condition === 'Occasion' && phone.colors && phone.colors.some(c => c.price) ? (
+                        (() => {
+                          const prices = phone.colors.filter(c => c.price).map(c => c.price!);
+                          const min = Math.min(...prices);
+                          const max = Math.max(...prices);
+                          return min === max ? `${min}€` : `${min}–${max}€`;
+                        })()
+                      ) : (
+                        `${phone.price}€`
+                      )}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-center whitespace-nowrap">
+                      <span className={cn(
+                        'inline-flex items-center justify-center min-w-7 h-7 px-2 rounded-lg text-xs font-bold tabular-nums',
+                        getAvailableQty(phone) > 5 ? 'bg-slate-100 text-slate-600' : 
+                        getAvailableQty(phone) > 0 ? 'bg-amber-50 text-amber-700 ring-1 ring-amber-200/80' : 
+                        'bg-red-50 text-red-600 ring-1 ring-red-200/80'
+                      )}>
+                        {getAvailableQty(phone)}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 whitespace-nowrap">
+                      <span className="text-[11px] font-semibold text-indigo-700 bg-indigo-50 ring-1 ring-indigo-200/80 px-2 py-0.5 rounded-full">
+                        {phone.store}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 whitespace-nowrap text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => openDupModal(phone)}
+                          className="p-1.5 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                          title="Ajouter au stock (autre magasin)"
+                        >
+                          <Copy size={15} />
+                        </button>
+                        <button
+                          onClick={() => handleOpenModal(phone)}
+                          className="p-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+                          title="Modifier"
+                        >
+                          <Edit2 size={15} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setConfirmDialog({
+                              message: `Êtes-vous sûr de vouloir supprimer ${phone.brand} ${phone.model} ?`,
+                              onConfirm: () => { deletePhone(phone.id); setConfirmDialog(null); }
+                            });
+                          }}
+                          className="p-1.5 text-red-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                          title="Supprimer"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {filteredInventory.length === 0 && (
+                  <tr>
+                    <td colSpan={8} className="px-6 py-16 text-center">
+                      <Package size={32} className="mx-auto text-slate-200 mb-3" />
+                      <p className="text-sm text-slate-400 font-medium">Aucun téléphone trouvé.</p>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Modal for Add/Edit */}
+        {isModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden max-h-[90vh] overflow-y-auto">
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                <h3 className="text-base font-bold text-slate-900">
+                  {editingPhone ? 'Modifier le téléphone' : 'Ajouter au stock'}
+                </h3>
+                <button onClick={() => setIsModalOpen(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"><X size={18} /></button>
+              </div>
+              <form onSubmit={handleSubmit} className="p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Marque</label>
+                    <select
+                      required
+                      className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                      value={formData.brand}
+                      onChange={(e) => setFormData({ ...formData, brand: e.target.value })}
+                    >
+                      <option value="" disabled>Sélectionner une marque</option>
+                      {brands.map(b => (
+                        <option key={b.id} value={b.name}>{b.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Modèle</label>
+                    <input
+                      required
+                      type="text"
+                      className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                      value={formData.model}
+                      onChange={(e) => setFormData({ ...formData, model: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Quantité totale</label>
+                  <input
+                    required
+                    type="number"
+                    min="0"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                    value={formData.quantity}
+                    onChange={(e) => setFormData({ ...formData, quantity: Number(e.target.value) })}
+                  />
+                  <p className="text-[11px] text-slate-500">RAM, stockage et prix sont définis par unité dans les lignes ci-dessous.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Couleurs & Répartition ({colorTotal}/{maxQty})</label>
+                  <div className="flex flex-wrap gap-2">
+                    {PHONE_COLORS.map(c => {
+                      const selected = formColors.some(fc => fc.color === c);
+                      const disabled = !selected && colorTotal >= maxQty;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => !disabled && addColorToForm(c)}
+                          disabled={disabled}
+                          className={`w-7 h-7 rounded-lg border-2 transition-all ${
+                            selected ? 'border-indigo-500 scale-110 ring-2 ring-indigo-500/20' 
+                            : disabled ? 'border-slate-100 opacity-40 cursor-not-allowed'
+                            : 'border-slate-200 hover:border-slate-400'
+                          }`}
+                          style={{ backgroundColor: c }}
+                        />
+                      );
+                    })}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="color"
+                        value={customColor}
+                        onChange={e => setCustomColor(e.target.value)}
+                        className="w-7 h-7 rounded-lg border-2 border-slate-200 cursor-pointer p-0"
+                        title="Couleur personnalisée"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => addColorToForm(customColor)}
+                        disabled={colorTotal >= maxQty}
+                        className="text-xs px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  {formColors.length > 0 && (
+                    <div className="space-y-2 mt-2">
+                      {formColors.map((fc, idx) => (
+                        <div key={idx} className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded border-2 border-slate-200" style={{ backgroundColor: fc.color }} />
+                            <span className="text-xs text-slate-500 font-medium w-20">1 unité</span>
+                            <input
+                              type="text"
+                              placeholder="IMEI"
+                              value={fc.reference || ''}
+                              onChange={(e) => updateColorCondition(idx, 'reference', e.target.value.trim())}
+                              className="w-40 px-2 py-1 text-xs font-mono bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+                            />
+                            {/* Sold / Available toggle */}
+                            <button
+                              type="button"
+                              title={fc.qty === 0 ? 'Marquer comme disponible (retour client)' : 'Marquer comme vendu'}
+                              onClick={() => setFormColors(prev => prev.map((c, i) => i === idx ? { ...c, qty: c.qty === 0 ? 1 : 0 } : c))}
+                              className={cn(
+                                'inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold border transition-all',
+                                fc.qty === 0
+                                  ? 'bg-red-50 text-red-600 border-red-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-300'
+                                  : 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-red-50 hover:text-red-600 hover:border-red-200'
+                              )}
+                            >
+                              {fc.qty === 0
+                                ? <><ShoppingCart size={11} /> Vendu</>
+                                : <><RotateCcw size={11} /> Dispo</>}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeColorFromForm(idx)}
+                              className="text-red-400 hover:text-red-600 transition-colors ml-auto"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                          {fc.reference && (
+                            <div className="ml-8 flex justify-start">
+                              <ReactBarcode value={fc.reference} format="CODE128" width={1.2} height={30} fontSize={9} margin={2} />
+                            </div>
+                          )}
+                          <div className="ml-8 space-y-2 p-3 bg-indigo-50/60 border border-indigo-100/80 rounded-xl">
+                            <div className="grid grid-cols-4 gap-2">
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">État</label>
+                                <select
+                                  className="w-full px-2 py-1.5 text-xs bg-white border border-indigo-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+                                  value={fc.condition || 'Neuf'}
+                                  onChange={(e) => updateColorCondition(idx, 'condition', e.target.value)}
+                                >
+                                  <option value="Neuf">Neuf</option>
+                                  <option value="Occasion">Occasion</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">RAM</label>
+                                <select
+                                  className="w-full px-2 py-1.5 text-xs bg-white border border-indigo-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+                                  value={fc.ram || '8 Go'}
+                                  onChange={(e) => updateColorCondition(idx, 'ram', e.target.value)}
+                                >
+                                  {RAM_OPTIONS.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Stockage</label>
+                                <select
+                                  className="w-full px-2 py-1.5 text-xs bg-white border border-indigo-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+                                  value={fc.storage || '128 Go'}
+                                  onChange={(e) => updateColorCondition(idx, 'storage', e.target.value)}
+                                >
+                                  {STORAGE_OPTIONS.map(opt => (
+                                    <option key={opt} value={opt}>{opt}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider">Prix (€)</label>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.01"
+                                  placeholder="0"
+                                  className="w-full px-2 py-1.5 text-xs bg-white border border-indigo-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-400 transition-all"
+                                  value={fc.price ?? ''}
+                                  onChange={(e) => updateColorCondition(idx, 'price', e.target.value ? Number(e.target.value) : '')}
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Remarques (optionnel)</label>
+                              <textarea
+                                rows={2}
+                                placeholder="ex: Face ID non fonctionnel, micro-rayure sur le dos..."
+                                className="w-full px-2 py-1.5 text-xs bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all resize-none"
+                                value={fc.notes || ''}
+                                onChange={(e) => updateColorCondition(idx, 'notes', e.target.value)}
+                              />
+                            </div>
+                            {(fc.condition === 'Occasion') && (
+                              <div className="grid grid-cols-3 gap-2">
+                                <div>
+                                  <label className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">🔋 Batterie</label>
+                                  <input
+                                    type="text"
+                                    placeholder="ex: 87%"
+                                    className="w-full px-2 py-1.5 text-xs bg-white border border-amber-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-400 transition-all"
+                                    value={fc.batteryHealth || ''}
+                                    onChange={(e) => updateColorCondition(idx, 'batteryHealth', e.target.value)}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">📱 Écran</label>
+                                  <select
+                                    className="w-full px-2 py-1.5 text-xs bg-white border border-amber-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-400 transition-all"
+                                    value={fc.screenCondition || ''}
+                                    onChange={(e) => updateColorCondition(idx, 'screenCondition', e.target.value)}
+                                  >
+                                    <option value="">—</option>
+                                    <option value="Parfait">Parfait</option>
+                                    <option value="Bon">Bon</option>
+                                    <option value="Rayures légères">Rayures légères</option>
+                                    <option value="Rayures visibles">Rayures visibles</option>
+                                    <option value="Fissuré">Fissuré</option>
+                                    <option value="Cassé">Cassé</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-bold text-amber-600 uppercase tracking-wider">🛡️ Châssis</label>
+                                  <select
+                                    className="w-full px-2 py-1.5 text-xs bg-white border border-amber-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-200 focus:border-amber-400 transition-all"
+                                    value={fc.frameCondition || ''}
+                                    onChange={(e) => updateColorCondition(idx, 'frameCondition', e.target.value)}
+                                  >
+                                    <option value="">—</option>
+                                    <option value="Parfait">Parfait</option>
+                                    <option value="Bon">Bon</option>
+                                    <option value="Micro-rayures">Micro-rayures</option>
+                                    <option value="Rayures visibles">Rayures visibles</option>
+                                    <option value="Cabossé">Cabossé</option>
+                                    <option value="Endommagé">Endommagé</option>
+                                  </select>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      <p className={`text-xs ${colorTotal > maxQty ? 'text-red-500 font-medium' : 'text-slate-500'}`}>
+                        Réparti : {colorTotal} / {maxQty} unités
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Magasin</label>
+                  <select
+                    className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                    value={formData.store}
+                    onChange={(e) => setFormData({ ...formData, store: e.target.value as Store })}
+                  >
+                    {allowedStores.map(s => (
+                      <option key={s.id} value={s.name}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="flex-1 px-4 py-2.5 bg-white border border-slate-200/80 text-slate-600 rounded-xl hover:bg-slate-50 transition-all font-semibold text-sm"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/25 hover:shadow-indigo-600/40 transition-all"
+                  >
+                    {editingPhone ? 'Enregistrer' : 'Ajouter'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal for Brand Management */}
+        {isBrandModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+              <div className="p-5 border-b border-slate-100 flex justify-between items-center">
+                <h3 className="text-base font-bold text-slate-900">Gérer les marques</h3>
+                <button onClick={() => setIsBrandModalOpen(false)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Nouvelle marque..."
+                    className="flex-1 px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                    value={newBrandName}
+                    onChange={(e) => setNewBrandName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddBrand()}
+                  />
+                  <button
+                    onClick={handleAddBrand}
+                    disabled={!newBrandName.trim()}
+                    className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/25 hover:shadow-indigo-600/40 disabled:from-slate-300 disabled:to-slate-300 disabled:shadow-none transition-all"
+                  >
+                    Ajouter
+                  </button>
+                </div>
+                <div className="rounded-xl border border-slate-200/80 overflow-hidden">
+                  <ul className="divide-y divide-slate-50 max-h-60 overflow-y-auto">
+                    {brands.map(b => (
+                      <li key={b.id} className="px-4 py-3 flex justify-between items-center hover:bg-slate-50/60 transition-colors gap-2">
+                        {editingBrandId === b.id ? (
+                          <input
+                            autoFocus
+                            type="text"
+                            className="flex-1 px-2 py-1 border border-indigo-400 rounded-lg text-sm font-semibold focus:outline-none"
+                            value={editingBrandName}
+                            onChange={e => setEditingBrandName(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && editingBrandName.trim()) {
+                                updateBrand(b.id, editingBrandName.trim());
+                                setEditingBrandId(null);
+                              }
+                              if (e.key === 'Escape') setEditingBrandId(null);
+                            }}
+                          />
+                        ) : (
+                          <span className="text-sm font-semibold text-slate-700 flex-1">{b.name}</span>
+                        )}
+                        <div className="flex items-center gap-1 shrink-0">
+                          {editingBrandId === b.id ? (
+                            <>
+                              <button
+                                onClick={() => {
+                                  if (editingBrandName.trim()) {
+                                    updateBrand(b.id, editingBrandName.trim());
+                                    setEditingBrandId(null);
+                                  }
+                                }}
+                                disabled={!editingBrandName.trim()}
+                                className="px-3 py-1 rounded-lg bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+                              >
+                                Sauv.
+                              </button>
+                              <button
+                                onClick={() => setEditingBrandId(null)}
+                                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                              >
+                                <X size={14} />
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              onClick={() => { setEditingBrandId(b.id); setEditingBrandName(b.name); }}
+                              className="p-1.5 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                              title="Modifier"
+                            >
+                              <Edit2 size={15} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setConfirmDialog({
+                                message: `Êtes-vous sûr de vouloir supprimer la marque ${b.name} ?`,
+                                onConfirm: () => { deleteBrand(b.id); setConfirmDialog(null); }
+                              });
+                            }}
+                            className="p-1.5 text-slate-300 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Supprimer"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                    {brands.length === 0 && (
+                      <li className="p-4 text-center text-slate-400 text-sm">Aucune marque.</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Quick-Add (Duplicate) Modal */}
+        {dupPhone && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden max-h-[90vh] overflow-y-auto">
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Ajouter au stock</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">Même modèle, nouveau magasin / nouvelles couleurs</p>
+                </div>
+                <button onClick={() => setDupPhone(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"><X size={18} /></button>
+              </div>
+
+              {/* Phone summary */}
+              <div className="px-5 pt-4">
+                <div className="flex items-center gap-3 p-3 bg-slate-50/80 rounded-xl border border-slate-100">
+                  <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-indigo-400 to-indigo-600 flex items-center justify-center text-white shrink-0">
+                    <Package size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-slate-900 truncate">{dupPhone.brand} {dupPhone.model}</p>
+                    <p className="text-xs text-slate-400">{dupPhone.storage} · {dupPhone.ram} RAM · {dupPhone.condition} · {dupPhone.price}€</p>
+                  </div>
+                </div>
+              </div>
+
+              <form onSubmit={handleDupSubmit} className="p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Quantité</label>
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                      value={dupQty}
+                      onChange={(e) => setDupQty(Math.max(1, Number(e.target.value)))}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Magasin</label>
+                    <select
+                      className="w-full px-3 py-2.5 bg-white border border-slate-200/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 transition-all"
+                      value={dupStore}
+                      onChange={(e) => setDupStore(e.target.value)}
+                    >
+                      {allowedStores.map(s => (
+                        <option key={s.id} value={s.name}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Couleurs & Répartition ({dupColorTotal}/{dupQty})</label>
+                  <p className="text-[11px] text-rose-500 font-semibold">IMEI manuel obligatoire pour chaque unité (aucun doublon).</p>
+                  <div className="flex flex-wrap gap-2">
+                    {PHONE_COLORS.map(c => {
+                      const selected = dupColors.some(fc => fc.color === c);
+                      const disabled = !selected && dupColorTotal >= dupQty;
+                      return (
+                        <button
+                          key={c}
+                          type="button"
+                          onClick={() => !disabled && addDupColor(c)}
+                          disabled={disabled}
+                          className={`w-7 h-7 rounded-lg border-2 transition-all ${
+                            selected ? 'border-indigo-500 scale-110 ring-2 ring-indigo-500/20'
+                            : disabled ? 'border-slate-100 opacity-40 cursor-not-allowed'
+                            : 'border-slate-200 hover:border-slate-400'
+                          }`}
+                          style={{ backgroundColor: c }}
+                        />
+                      );
+                    })}
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="color"
+                        value={dupCustomColor}
+                        onChange={e => setDupCustomColor(e.target.value)}
+                        className="w-7 h-7 rounded-lg border-2 border-slate-200 cursor-pointer p-0"
+                        title="Couleur personnalisée"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => addDupColor(dupCustomColor)}
+                        disabled={dupColorTotal >= dupQty}
+                        className="text-xs px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed font-semibold"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  {dupColors.length > 0 && (
+                    <div className="space-y-2 mt-2">
+                      {dupColors.map((fc, idx) => (
+                        <div key={`${fc.color}-${idx}`} className="space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="w-6 h-6 rounded border-2 border-slate-200" style={{ backgroundColor: fc.color }} />
+                            <span className="w-20 px-2 py-1 text-sm bg-slate-100 border border-slate-200/80 rounded-lg text-slate-600 text-center">1 unité</span>
+                            <input
+                              type="text"
+                              placeholder="IMEI"
+                              value={fc.reference || ''}
+                              onChange={(e) => updateDupColorReference(idx, e.target.value.trim())}
+                              required
+                              className="flex-1 min-w-0 px-2 py-1 text-sm bg-white border border-slate-200/80 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => removeDupColor(idx)}
+                              className="text-red-400 hover:text-red-600 transition-colors"
+                            >
+                              <X size={16} />
+                            </button>
+                          </div>
+                          {fc.reference && (
+                            <div className="ml-8 inline-flex bg-white rounded-lg p-1.5 border border-slate-200">
+                              <ReactBarcode value={fc.reference} format="CODE128" width={1.2} height={30} fontSize={9} margin={2} />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                      <p className={`text-xs ${dupColorTotal > dupQty ? 'text-red-500 font-medium' : 'text-slate-500'}`}>
+                        Réparti : {dupColorTotal} / {dupQty} unités
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setDupPhone(null)}
+                    className="flex-1 px-4 py-2.5 bg-white border border-slate-200/80 text-slate-600 rounded-xl hover:bg-slate-50 transition-all font-semibold text-sm"
+                  >
+                    Annuler
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-xl font-bold text-sm shadow-lg shadow-indigo-600/25 hover:shadow-indigo-600/40 transition-all"
+                  >
+                    Ajouter au stock
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Confirm Dialog */}
+        {confirmDialog && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+              <div className="p-6 text-center space-y-4">
+                <div className="mx-auto h-14 w-14 rounded-2xl bg-red-50 flex items-center justify-center">
+                  <Trash2 size={24} className="text-red-500" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Confirmer la suppression</h3>
+                  <p className="text-sm text-slate-400 mt-2">{confirmDialog.message}</p>
+                </div>
+              </div>
+              <div className="px-6 pb-6 flex gap-3">
+                <button
+                  onClick={() => setConfirmDialog(null)}
+                  className="flex-1 px-4 py-2.5 bg-white border border-slate-200/80 text-slate-600 rounded-xl hover:bg-slate-50 transition-all font-semibold text-sm"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={confirmDialog.onConfirm}
+                  className="flex-1 px-4 py-2.5 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-bold text-sm shadow-lg shadow-red-500/25 hover:shadow-red-500/40 transition-all"
+                >
+                  Supprimer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Phone Detail Modal */}
+        {detailPhone && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={() => setDetailPhone(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden" onClick={e => e.stopPropagation()}>
+              {/* Header */}
+              <div className="p-5 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">{detailPhone.brand} {detailPhone.model}</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">{detailPhone.storage} · {detailPhone.ram} RAM · {detailPhone.condition} · {detailPhone.store}</p>
+                </div>
+                <button onClick={() => setDetailPhone(null)} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors">
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Unit list */}
+              <div className="p-5 space-y-3 max-h-[60vh] overflow-y-auto">
+                {detailPhone.colors && detailPhone.colors.length > 0 ? (
+                  detailPhone.colors.map((c, i) => (
+                    <div key={i} className={cn('p-3 rounded-xl border space-y-2', c.qty === 0 ? 'border-red-200 bg-red-50/40 opacity-70' : 'border-slate-100 bg-slate-50')}>
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="w-10 h-10 rounded-lg border-2 border-slate-200 shrink-0"
+                          style={{ backgroundColor: c.color }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-900">Unité {i + 1}</span>
+                            <span className="text-xs text-slate-500">× {c.qty}</span>
+                            {c.qty === 0 && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
+                                <X size={9} className="stroke-[3]" /> VENDU
+                              </span>
+                            )}
+                            {c.price ? (
+                              <span className="text-sm font-bold text-indigo-600">{c.price}€</span>
+                            ) : detailPhone.price > 0 ? (
+                              <span className="text-sm font-bold text-slate-600">{detailPhone.price}€</span>
+                            ) : null}
+                          </div>
+                          {c.reference && (
+                            <p className="text-[11px] font-mono text-slate-500">{c.reference}</p>
+                          )}
+                        </div>
+                      </div>
+                      {c.reference && (
+                        <div className="flex justify-center bg-white rounded-lg p-2 border border-slate-100">
+                          <ReactBarcode value={c.reference} format="CODE128" width={1.5} height={35} fontSize={10} margin={2} />
+                        </div>
+                      )}
+                      {(c.batteryHealth || c.screenCondition || c.frameCondition) && (
+                        <div className="flex flex-wrap gap-1.5">
+                          {c.batteryHealth && <span className="text-[11px] px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full font-medium">🔋 {c.batteryHealth}</span>}
+                          {c.screenCondition && <span className="text-[11px] px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full font-medium">📱 {c.screenCondition}</span>}
+                          {c.frameCondition && <span className="text-[11px] px-2 py-0.5 bg-orange-50 text-orange-700 rounded-full font-medium">🛡️ {c.frameCondition}</span>}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-slate-500 text-center py-4">Aucun détail couleur disponible.</p>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-3 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between">
+                <span className="text-xs text-slate-400 font-medium">{detailPhone.colors && detailPhone.colors.length > 0 ? detailPhone.colors.reduce((sum, color) => sum + (color.qty || 0), 0) : detailPhone.quantity} unité(s) au total</span>
+                <button
+                  onClick={() => setDetailPhone(null)}
+                  className="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-200/80 rounded-xl hover:bg-slate-50 transition-all"
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </AdminLayout>
+  );
+};
