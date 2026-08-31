@@ -178,6 +178,7 @@ export interface Sale {
   store: Store;
   soldBy: string;
   soldByName: string;
+  customerName?: string;
   soldAt: string;
 }
 

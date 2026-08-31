@@ -122,6 +122,7 @@ const openWarrantyVoucher = (sale: Sale) => {
 
       <div class="section-title">Details appareil</div>
       <div class="grid">
+        <div class="line"><div class="label">Client</div><div class="value">${escapeHtml(sale.customerName || '-')}</div></div>
         <div class="line"><div class="label">Marque / Modele</div><div class="value">${escapeHtml(`${sale.phoneBrand} ${sale.phoneModel}`)}</div></div>
         <div class="line"><div class="label">Etat</div><div class="value">${escapeHtml(conditionLabel)}</div></div>
         <div class="line"><div class="label">RAM / Stockage</div><div class="value">${escapeHtml(`${sale.phoneRam} / ${sale.phoneStorage}`)}</div></div>
@@ -237,6 +238,7 @@ export const SalesArchivePage = () => {
       return (
         sale.phoneModel.toLowerCase().includes(term) ||
         sale.phoneBrand.toLowerCase().includes(term) ||
+        (sale.customerName?.toLowerCase().includes(term) ?? false) ||
         (sale.reference?.toLowerCase().includes(term) ?? false)
       );
     });
@@ -245,7 +247,7 @@ export const SalesArchivePage = () => {
   const totalRevenue = filteredSales.reduce((sum, s) => sum + s.price, 0);
 
   const downloadCSV = () => {
-    const headers = ['Date', 'Marque', 'Modèle', 'État', 'RAM', 'Stockage', 'Couleur', 'IMEI', 'Prix', 'Magasin', 'Vendu par'];
+    const headers = ['Date', 'Marque', 'Modèle', 'État', 'RAM', 'Stockage', 'Couleur', 'IMEI', 'Prix', 'Magasin', 'Vendu par', 'Client'];
     const rows = filteredSales.map(s => [
       new Date(s.soldAt).toLocaleDateString('fr-FR'),
       s.phoneBrand,
@@ -258,6 +260,7 @@ export const SalesArchivePage = () => {
       s.price.toFixed(2),
       s.store,
       s.soldByName,
+      s.customerName || '-',
     ]);
 
     const csv = [headers, ...rows].map(row => row.map(cell => `"${cell}"`).join(',')).join('\n');
@@ -336,7 +339,7 @@ export const SalesArchivePage = () => {
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Rechercher par modèle, IMEI..."
+                placeholder="Rechercher par modèle, IMEI, client..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
                 className={cn(
@@ -393,6 +396,7 @@ export const SalesArchivePage = () => {
                     <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Prix</th>
                     <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Magasin</th>
                     <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Vendu par</th>
+                    <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Client</th>
                     <th className="px-5 py-3 text-left text-xs font-bold text-slate-600 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
@@ -447,6 +451,9 @@ export const SalesArchivePage = () => {
                           <User size={14} className="text-slate-400" />
                           {sale.soldByName}
                         </div>
+                      </td>
+                      <td className="px-5 py-4 text-sm font-semibold text-slate-700">
+                        {sale.customerName || '-'}
                       </td>
                       <td className="px-5 py-4 text-sm">
                         <div className="flex flex-wrap items-center gap-2">

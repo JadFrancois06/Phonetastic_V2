@@ -95,6 +95,7 @@ const getWarrantyLogoByStore = (store: string) => {
 const openWarrantyVoucher = (params: {
   brand: string;
   model: string;
+  customerName: string;
   ram: string;
   storage: string;
   condition: 'Neuf' | 'Occasion';
@@ -173,6 +174,7 @@ const openWarrantyVoucher = (params: {
 
       <div class="section-title">Details appareil</div>
       <div class="grid">
+        <div class="line"><div class="label">Client</div><div class="value">${escapeHtml(params.customerName || '-')}</div></div>
         <div class="line"><div class="label">Marque / Modele</div><div class="value">${escapeHtml(`${params.brand} ${params.model}`)}</div></div>
         <div class="line"><div class="label">Etat</div><div class="value">${escapeHtml(conditionLabel)}</div></div>
         <div class="line"><div class="label">RAM / Stockage</div><div class="value">${escapeHtml(`${params.ram} / ${params.storage}`)}</div></div>
@@ -269,6 +271,8 @@ export const TabletStockPage = () => {
   const [sellingPhone, setSellingPhone] = useState<Phone | null>(null);
   const [sellColorIndex, setSellColorIndex] = useState<number>(0);
   const [sellPrice, setSellPrice] = useState('');
+  const [sellImeiSearch, setSellImeiSearch] = useState('');
+  const [customerName, setCustomerName] = useState('');
   const [sellConfirmed, setSellConfirmed] = useState(false);
   const [sellEmployeeId, setSellEmployeeId] = useState('');
   const [archivingUnitKey, setArchivingUnitKey] = useState<string | null>(null);
@@ -369,10 +373,14 @@ export const TabletStockPage = () => {
 
   // Employees to show in dropdown: present ones first, fallback to all store employees
   const sellCandidates = presentEmployees.length > 0 ? presentEmployees : storeEmployees;
+  const selectedSellUnit = sellingPhone?.colors?.[sellColorIndex];
+  const selectedUnitMatchesImeiSearch = !sellImeiSearch.trim() || normalizeSearchText(selectedSellUnit?.reference || '').includes(normalizeSearchText(sellImeiSearch));
 
   // Sell helpers
   const openSellModal = (phone: Phone) => {
     setSellConfirmed(false);
+    setSellImeiSearch('');
+    setCustomerName('');
     // Find the REAL index of the first available color to avoid selling a qty=0 slot by default
     const firstAvailIdx = phone.colors ? phone.colors.findIndex(c => c.qty > 0) : -1;
     setSellColorIndex(firstAvailIdx >= 0 ? firstAvailIdx : 0);
@@ -388,6 +396,8 @@ export const TabletStockPage = () => {
     setSellingPhone(null);
     setSellConfirmed(false);
     setSellEmployeeId('');
+    setSellImeiSearch('');
+    setCustomerName('');
   };
 
   const archiveSoldUnitToSales = (phone: Phone, colorIndex: number) => {
@@ -411,6 +421,7 @@ export const TabletStockPage = () => {
       store: phone.store,
       soldBy: currentUser.id,
       soldByName: currentUser.fullName,
+      customerName: '',
       soldAt: new Date().toISOString(),
     });
 
@@ -428,6 +439,7 @@ export const TabletStockPage = () => {
 
   const confirmSell = () => {
     if (!sellingPhone || !currentUser) return;
+    if (!selectedUnitMatchesImeiSearch) return;
     const finalPrice = Number(sellPrice) || 0;
     let updatedColors = sellingPhone.colors ? [...sellingPhone.colors] : undefined;
     let soldColor: PhoneColor | undefined;
@@ -471,20 +483,8 @@ export const TabletStockPage = () => {
       store: sellingPhone.store,
       soldBy: soldById,
       soldByName: soldByName,
+      customerName: customerName.trim(),
       soldAt: new Date().toISOString(),
-    });
-
-    openWarrantyVoucher({
-      brand: sellingPhone.brand,
-      model: sellingPhone.model,
-      ram: soldColor?.ram || sellingPhone.ram,
-      storage: soldColor?.storage || sellingPhone.storage,
-      condition: (soldColor?.condition || sellingPhone.condition) as 'Neuf' | 'Occasion',
-      color: soldColor?.color,
-      reference: colorRef,
-      price: finalPrice,
-      soldAt: new Date(),
-      store: sellingPhone.store,
     });
 
     setSellConfirmed(true);
@@ -898,7 +898,27 @@ export const TabletStockPage = () => {
                   </div>
                   <p className="text-2xl font-black text-slate-900">Vente enregistrée !</p>
                   <p className="text-base text-slate-500">{sellingPhone.brand} {sellingPhone.model} vendu à <span className="font-bold text-emerald-600">{Number(sellPrice) || 0}€</span></p>
-                  <button onClick={closeSellModal} className="mt-2 px-8 py-3 rounded-xl bg-emerald-600 text-white font-bold text-base">Fermer</button>
+                  <div className="pt-2 flex flex-col sm:flex-row gap-3 justify-center">
+                    <button
+                      onClick={() => openWarrantyVoucher({
+                        brand: sellingPhone.brand,
+                        model: sellingPhone.model,
+                        customerName: customerName.trim(),
+                        ram: sellingPhone.colors?.[sellColorIndex]?.ram || sellingPhone.ram,
+                        storage: sellingPhone.colors?.[sellColorIndex]?.storage || sellingPhone.storage,
+                        condition: (sellingPhone.colors?.[sellColorIndex]?.condition || sellingPhone.condition) as 'Neuf' | 'Occasion',
+                        color: sellingPhone.colors?.[sellColorIndex]?.color,
+                        reference: sellingPhone.colors?.[sellColorIndex]?.reference,
+                        price: Number(sellPrice) || 0,
+                        soldAt: new Date(),
+                        store: sellingPhone.store,
+                      })}
+                      className="px-6 py-3 rounded-xl bg-indigo-600 text-white font-bold text-base hover:bg-indigo-700"
+                    >
+                      Imprimer le bon de garantie
+                    </button>
+                    <button onClick={closeSellModal} className="px-8 py-3 rounded-xl bg-emerald-600 text-white font-bold text-base">Fermer</button>
+                  </div>
                 </div>
               ) : (
                 <>
@@ -971,9 +991,19 @@ export const TabletStockPage = () => {
                     {sellingPhone.colors && sellingPhone.colors.filter(c => c.qty > 0).length > 0 && (
                       <div>
                         <label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Sélectionner l'unité à vendre</label>
+                        <div className="relative mt-2">
+                          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+                          <input
+                            type="search"
+                            value={sellImeiSearch}
+                            onChange={e => setSellImeiSearch(e.target.value)}
+                            placeholder="Rechercher par IMEI"
+                            className="w-full pl-11 pr-4 py-3 border-2 border-slate-200 rounded-xl text-base font-medium focus:outline-none focus:border-emerald-500"
+                          />
+                        </div>
                         <div className="mt-3 space-y-3">
                           {sellingPhone.colors.map((c, i) => {
-                            if (c.qty === 0) return null;
+                            if (c.qty === 0 || (sellImeiSearch.trim() && !normalizeSearchText(c.reference || '').includes(normalizeSearchText(sellImeiSearch)))) return null;
                             const realIdx = i;
                             return (
                               <button
@@ -1021,8 +1051,22 @@ export const TabletStockPage = () => {
                             );
                           })}
                         </div>
+                        {sellImeiSearch.trim() && !sellingPhone.colors.some(c => c.qty > 0 && normalizeSearchText(c.reference || '').includes(normalizeSearchText(sellImeiSearch))) && (
+                          <p className="mt-3 text-sm font-semibold text-amber-700">Aucune unité disponible avec cet IMEI.</p>
+                        )}
                       </div>
                     )}
+                    <div>
+                      <label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Nom du client</label>
+                      <input
+                        type="text"
+                        value={customerName}
+                        onChange={e => setCustomerName(e.target.value)}
+                        placeholder="Nom du client"
+                        required
+                        className="mt-2 w-full px-5 py-4 border-2 border-slate-200 rounded-2xl text-base font-semibold focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
                     <div>
                       <label className="text-sm font-bold text-slate-500 uppercase tracking-wider">Prix de vente (€)</label>
                       <input
@@ -1037,7 +1081,8 @@ export const TabletStockPage = () => {
                     <button onClick={closeSellModal} className="flex-1 py-4 rounded-2xl border-2 border-slate-300 text-slate-700 text-base font-bold hover:bg-white transition-colors">Annuler</button>
                     <button
                       onClick={confirmSell}
-                      className="flex-1 py-4 rounded-2xl bg-emerald-600 text-white text-base font-bold inline-flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/25"
+                      disabled={!customerName.trim() || !selectedUnitMatchesImeiSearch}
+                      className="flex-1 py-4 rounded-2xl bg-emerald-600 text-white text-base font-bold inline-flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-600/25 disabled:bg-slate-300 disabled:shadow-none disabled:cursor-not-allowed"
                     >
                       <ShoppingCart size={20} /> Confirmer vente
                     </button>

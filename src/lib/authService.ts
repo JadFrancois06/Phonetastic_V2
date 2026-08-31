@@ -608,10 +608,21 @@ export async function fetchPhoneReservationLocksFromDB(): Promise<Record<string,
 
 // ─── Sales ────────────────────────────────────────────────────
 export async function fetchSalesFromDB(): Promise<import('../types').Sale[]> {
-  const { data, error } = await supabase
+  const salesColumns = 'id, phone_brand, phone_model, phone_ram, phone_storage, phone_condition, color, reference, price, store, sold_by, sold_by_name, customer_name, sold_at';
+  let { data, error } = await supabase
     .from('sales')
-    .select('id, phone_brand, phone_model, phone_ram, phone_storage, phone_condition, color, reference, price, store, sold_by, sold_by_name, sold_at')
+    .select(salesColumns)
     .order('sold_at', { ascending: false });
+
+  // Existing databases need the migration before customer_name can be queried.
+  // Keep the archive readable until that migration is applied.
+  if (error) {
+    ({ data, error } = await supabase
+      .from('sales')
+      .select('id, phone_brand, phone_model, phone_ram, phone_storage, phone_condition, color, reference, price, store, sold_by, sold_by_name, sold_at')
+      .order('sold_at', { ascending: false }));
+  }
+
   if (error || !data) return [];
   return data.map((s: any) => ({
     id: s.id,
@@ -626,29 +637,44 @@ export async function fetchSalesFromDB(): Promise<import('../types').Sale[]> {
     store: s.store,
     soldBy: s.sold_by,
     soldByName: s.sold_by_name,
+    customerName: s.customer_name,
     soldAt: s.sold_at,
   }));
 }
 
 export async function insertSaleToDB(sale: Omit<import('../types').Sale, 'id'>): Promise<string | null> {
-  const { data, error } = await supabase
+  const saleData = {
+    phone_brand: sale.phoneBrand,
+    phone_model: sale.phoneModel,
+    phone_ram: sale.phoneRam,
+    phone_storage: sale.phoneStorage,
+    phone_condition: sale.phoneCondition,
+    color: sale.color,
+    reference: sale.reference,
+    price: sale.price,
+    store: sale.store,
+    sold_by: sale.soldBy,
+    sold_by_name: sale.soldByName,
+    sold_at: sale.soldAt,
+  };
+  let { data, error } = await supabase
     .from('sales')
     .insert({
-      phone_brand: sale.phoneBrand,
-      phone_model: sale.phoneModel,
-      phone_ram: sale.phoneRam,
-      phone_storage: sale.phoneStorage,
-      phone_condition: sale.phoneCondition,
-      color: sale.color,
-      reference: sale.reference,
-      price: sale.price,
-      store: sale.store,
-      sold_by: sale.soldBy,
-      sold_by_name: sale.soldByName,
-      sold_at: sale.soldAt,
+      ...saleData,
+      customer_name: sale.customerName,
     })
     .select('id')
     .single();
+
+  // Save the sale even before the optional customer_name migration is applied.
+  if (error) {
+    ({ data, error } = await supabase
+      .from('sales')
+      .insert(saleData)
+      .select('id')
+      .single());
+  }
+
   if (error || !data) { console.error('[insertSaleToDB]', error?.message); return null; }
   return data.id;
 }
